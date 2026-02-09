@@ -81,6 +81,7 @@ chmod +x "$NOTIFY_SCRIPT"
 # -- Config directory --
 
 mkdir -p "$NOTIFY_DIR"
+chmod 700 "$NOTIFY_DIR"
 info "Config directory: $NOTIFY_DIR"
 
 # -- Webhook URL --
@@ -101,8 +102,10 @@ if [ -z "$WEBHOOK_URL" ]; then
     if [ -z "$WEBHOOK_URL" ]; then
         error "No webhook URL provided. You can set it later in $NOTIFY_DIR/.env"
         echo "CLAUDE_NOTIFY_WEBHOOK=" > "$NOTIFY_DIR/.env"
+        chmod 600 "$NOTIFY_DIR/.env"
     else
         echo "CLAUDE_NOTIFY_WEBHOOK=$WEBHOOK_URL" > "$NOTIFY_DIR/.env"
+        chmod 600 "$NOTIFY_DIR/.env"
         info "Webhook URL saved to $NOTIFY_DIR/.env"
     fi
 else

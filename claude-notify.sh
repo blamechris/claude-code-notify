@@ -54,6 +54,7 @@ HOOK_EVENT=$(echo "$INPUT" | jq -r '.hook_event_name // empty' 2>/dev/null)
 CWD=$(echo "$INPUT" | jq -r '.cwd // empty' 2>/dev/null)
 PROJECT_NAME="unknown"
 [ -n "$CWD" ] && PROJECT_NAME=$(basename "$CWD")
+PROJECT_NAME=$(echo "$PROJECT_NAME" | tr -cd 'A-Za-z0-9._-')
 
 # Per-project subagent count file
 SUBAGENT_COUNT_FILE="$THROTTLE_DIR/subagent-count-${PROJECT_NAME}"
@@ -101,7 +102,7 @@ get_project_color() {
     if [ -f "$NOTIFY_DIR/colors.conf" ]; then
         local color
         color=$(grep -m1 "^${1}=" "$NOTIFY_DIR/colors.conf" 2>/dev/null | cut -d= -f2- || true)
-        if [ -n "$color" ]; then
+        if [ -n "$color" ] && [[ "$color" =~ ^[0-9]+$ ]]; then
             echo "$color"
             return
         fi
