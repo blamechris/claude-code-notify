@@ -79,7 +79,7 @@ For each review comment (Copilot or human) that has NOT been replied to, you MUS
 #### Outcome 1: FIX IMMEDIATELY (default)
 
 1. Make the code fix
-2. Commit with descriptive message
+2. Commit with descriptive message (NO attribution -- no Co-Authored-By, no "Generated with", no AI mentions)
 3. Reply inline with the EXACT format below -- commit hash AND code diff are MANDATORY:
 
 ```bash
@@ -224,5 +224,6 @@ Output a final summary:
 5. **Be specific** -- ALWAYS show before/after code diffs in fix replies
 6. **Link commits** -- EVERY fix reply MUST include its commit hash
 7. **ALWAYS create issues for deferred items** -- NEVER say "good idea" without a GitHub issue URL. If it's valid and you're not fixing it now, create the issue. No exceptions.
-8. **No editing comments** -- Reply inline to comments, never edit them
-9. **Idempotent** -- Skip comments that already have replies (check in_reply_to_id)
+8. **No attribution** -- Follow Zero Attribution Policy (no Co-Authored-By, no "Generated with Claude", no AI mentions anywhere in commits, PRs, or code)
+9. **No editing comments** -- Reply inline to comments, never edit them
+10. **Idempotent** -- Skip comments that already have replies (check in_reply_to_id)

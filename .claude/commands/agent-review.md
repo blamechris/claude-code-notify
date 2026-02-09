@@ -172,6 +172,10 @@ Key expertise areas:
 - File-based state management and race conditions
 - Input sanitization in shell scripts
 
+## Critical Rules
+
+1. **No attribution** -- Follow Zero Attribution Policy (no Co-Authored-By, no "Generated with Claude", no AI mentions anywhere in commits, PRs, or code). Flag any violations found in the diff.
+
 ## Review Philosophy
 
 1. **Be constructive** - Suggest fixes, not just problems
