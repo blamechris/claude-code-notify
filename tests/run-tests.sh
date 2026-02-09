@@ -9,7 +9,7 @@
 #   ./tests/run-tests.sh          # Run all tests
 #   ./tests/run-tests.sh -v       # Verbose (show each test file name)
 
-set -uo pipefail
+set -euo pipefail
 
 TESTS_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$TESTS_DIR")"

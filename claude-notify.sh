@@ -43,9 +43,13 @@ if [ -f "$NOTIFY_DIR/.disabled" ]; then
     exit 0
 fi
 
+# -- Dependencies (jq required for JSON parsing) --
+
+command -v jq &>/dev/null || { echo "claude-notify: jq is required (brew install jq)" >&2; exit 1; }
+
 # -- Parse hook input --
 
-INPUT=$(cat)
+read -t 5 -r -d '' INPUT || true
 HOOK_EVENT=$(echo "$INPUT" | jq -r '.hook_event_name // empty' 2>/dev/null)
 [ -z "$HOOK_EVENT" ] && HOOK_EVENT="${1:-}"
 [ -z "$HOOK_EVENT" ] && exit 0
@@ -62,18 +66,24 @@ SUBAGENT_COUNT_FILE="$THROTTLE_DIR/subagent-count-${PROJECT_NAME}"
 # -- Subagent tracking (no webhook needed) --
 
 if [ "$HOOK_EVENT" = "SubagentStart" ]; then
+    LOCK="$SUBAGENT_COUNT_FILE.lock"
+    while ! mkdir "$LOCK" 2>/dev/null; do sleep 0.01; done
     COUNT=0
     [ -f "$SUBAGENT_COUNT_FILE" ] && COUNT=$(cat "$SUBAGENT_COUNT_FILE" 2>/dev/null || echo 0)
     echo $(( COUNT + 1 )) > "$SUBAGENT_COUNT_FILE"
+    rmdir "$LOCK" 2>/dev/null || true
     exit 0
 fi
 
 if [ "$HOOK_EVENT" = "SubagentStop" ]; then
+    LOCK="$SUBAGENT_COUNT_FILE.lock"
+    while ! mkdir "$LOCK" 2>/dev/null; do sleep 0.01; done
     COUNT=0
     [ -f "$SUBAGENT_COUNT_FILE" ] && COUNT=$(cat "$SUBAGENT_COUNT_FILE" 2>/dev/null || echo 0)
     NEW_COUNT=$(( COUNT - 1 ))
     [ "$NEW_COUNT" -lt 0 ] && NEW_COUNT=0
     echo "$NEW_COUNT" > "$SUBAGENT_COUNT_FILE"
+    rmdir "$LOCK" 2>/dev/null || true
     exit 0
 fi
 
@@ -84,9 +94,8 @@ if [ -z "${CLAUDE_NOTIFY_WEBHOOK:-}" ]; then
     exit 1
 fi
 
-# -- Dependencies --
+# -- Dependencies (curl required for webhook delivery) --
 
-command -v jq &>/dev/null || { echo "claude-notify: jq is required (brew install jq)" >&2; exit 1; }
 command -v curl &>/dev/null || { echo "claude-notify: curl is required" >&2; exit 1; }
 
 # -- Parse notification fields --
