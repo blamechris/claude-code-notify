@@ -157,11 +157,19 @@ BOT_NAME="${CLAUDE_NOTIFY_BOT_NAME:-Claude Code}"
 
 case "$NOTIFICATION_TYPE" in
     idle_prompt)
-        throttle_check "idle-${PROJECT_NAME}" "$IDLE_COOLDOWN" || exit 0
         SUBAGENTS=0
         [ -f "$SUBAGENT_COUNT_FILE" ] && SUBAGENTS=$(cat "$SUBAGENT_COUNT_FILE" 2>/dev/null || echo 0)
 
         if [ "$SUBAGENTS" -gt 0 ]; then
+            # Dedup: suppress if subagent count hasn't changed since last notification
+            LAST_COUNT_FILE="$THROTTLE_DIR/last-idle-count-${PROJECT_NAME}"
+            LAST_COUNT=""
+            [ -f "$LAST_COUNT_FILE" ] && LAST_COUNT=$(cat "$LAST_COUNT_FILE" 2>/dev/null || echo "")
+            [ "$SUBAGENTS" = "$LAST_COUNT" ] && exit 0
+            # Minimum 15s between subagent-count updates (prevent Discord rate limiting)
+            throttle_check "idle-busy-${PROJECT_NAME}" 15 || exit 0
+            echo "$SUBAGENTS" > "$LAST_COUNT_FILE"
+
             EMOJI=$(get_status_emoji "idle_busy")
             TITLE="${EMOJI} ${PROJECT_NAME} — Idle"
             FIELDS=$(jq -c -n \
@@ -171,6 +179,10 @@ case "$NOTIFICATION_TYPE" in
                     {"name": "Subagents", "value": $subs, "inline": true}
                 ]')
         else
+            # Clear last count so next subagent session starts fresh
+            rm -f "$THROTTLE_DIR/last-idle-count-${PROJECT_NAME}"
+            throttle_check "idle-${PROJECT_NAME}" "$IDLE_COOLDOWN" || exit 0
+
             EMOJI=$(get_status_emoji "idle_ready")
             TITLE="${EMOJI} ${PROJECT_NAME} — Ready for input"
             FIELDS=$(jq -c -n \
