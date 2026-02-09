@@ -1,0 +1,18 @@
+# Project color overrides for Discord embed sidebars.
+# Format: project_name=decimal_color_value
+# The project name is derived from the working directory basename.
+#
+# Convert hex to decimal: https://www.spycolor.com
+# Examples:
+#   Teal    #1ABC9C = 1752220
+#   Purple  #9B59B6 = 10181046
+#   Blue    #3498DB = 3447003
+#   Green   #2ECC71 = 3066993
+#   Orange  #E67E22 = 15105570
+#   Red     #E74C3C = 15158332
+#   Grey    #95A5A6 = 9807270
+#   Blurple #5865F2 = 5793266  (default)
+#
+# Uncomment and customize:
+# my-project=1752220
+# another-project=10181046
