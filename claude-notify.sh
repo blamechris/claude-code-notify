@@ -30,9 +30,12 @@ PERMISSION_COOLDOWN="${CLAUDE_NOTIFY_PERMISSION_COOLDOWN:-60}"
 
 mkdir -p "$THROTTLE_DIR"
 
-# Load webhook URL: env var > .env file
-if [ -z "${CLAUDE_NOTIFY_WEBHOOK:-}" ] && [ -f "$NOTIFY_DIR/.env" ]; then
-    CLAUDE_NOTIFY_WEBHOOK=$(grep -m1 '^CLAUDE_NOTIFY_WEBHOOK=' "$NOTIFY_DIR/.env" 2>/dev/null | cut -d= -f2- || true)
+# Load config from .env file (env vars take precedence)
+if [ -f "$NOTIFY_DIR/.env" ]; then
+    [ -z "${CLAUDE_NOTIFY_WEBHOOK:-}" ] && \
+        CLAUDE_NOTIFY_WEBHOOK=$(grep -m1 '^CLAUDE_NOTIFY_WEBHOOK=' "$NOTIFY_DIR/.env" 2>/dev/null | cut -d= -f2- || true)
+    [ -z "${CLAUDE_NOTIFY_BOT_NAME:-}" ] && \
+        CLAUDE_NOTIFY_BOT_NAME=$(grep -m1 '^CLAUDE_NOTIFY_BOT_NAME=' "$NOTIFY_DIR/.env" 2>/dev/null | cut -d= -f2- || true)
 fi
 
 # Check enabled state
@@ -126,7 +129,7 @@ get_project_color() {
 # -- Status emoji --
 get_status_emoji() {
     case "$1" in
-        idle_ready)    echo "🟢" ;;
+        idle_ready)    echo "🦀" ;;
         idle_busy)     echo "🔄" ;;
         permission)    echo "🔐" ;;
         *)             echo "📝" ;;
