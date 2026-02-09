@@ -140,6 +140,52 @@ cd claude-code-notify
 
 This removes hooks from `settings.json` but leaves your config in `~/.claude-notify/`.
 
+## Troubleshooting
+
+**Notifications aren't showing up in Discord**
+1. Verify your webhook URL: `curl -s -o /dev/null -w "%{http_code}" -H "Content-Type: application/json" -d '{"content":"test"}' "YOUR_WEBHOOK_URL"` — should return `204`
+2. Check if notifications are disabled: `ls ~/.claude-notify/.disabled` — if this file exists, remove it
+3. Check the webhook URL is set: `cat ~/.claude-notify/.env`
+4. Verify hooks are registered: `cat ~/.claude/settings.json | jq '.hooks'`
+
+**Getting "jq is required" error**
+- macOS: `brew install jq`
+- Ubuntu/Debian: `sudo apt install jq`
+- Other: see [jq downloads](https://jqlang.github.io/jq/download/)
+
+**Notifications are too frequent / not frequent enough**
+- Adjust cooldown timers via environment variables:
+  ```bash
+  export CLAUDE_NOTIFY_IDLE_COOLDOWN=300      # 5 minutes between idle notifications
+  export CLAUDE_NOTIFY_PERMISSION_COOLDOWN=30  # 30 seconds between permission notifications
+  ```
+- Cooldowns are per-project and reset on reboot (stored in `/tmp/claude-notify/`)
+
+**Webhook returns HTTP 429 (rate limited)**
+- Discord webhooks have a rate limit of ~30 requests per minute per webhook
+- The built-in throttling should prevent this, but if you have many projects active simultaneously, consider using separate webhooks per project
+
+**Subagent count seems wrong**
+- Subagent counts are tracked in `/tmp/claude-notify/` and reset on reboot
+- To manually reset: `rm /tmp/claude-notify/subagent-count-*`
+
+## FAQ
+
+**Can I use this with Slack instead of Discord?**
+Not currently. The script is designed specifically for Discord webhook embeds. Slack support could be added as a future enhancement.
+
+**Does this work on Linux?**
+Yes. The script uses standard POSIX utilities plus `jq` and `curl`. Install dependencies with your package manager.
+
+**Does this work on Windows?**
+Only through WSL (Windows Subsystem for Linux). Native Windows is not supported.
+
+**Can I have different webhook URLs per project?**
+Not currently — all projects share the same webhook URL. You can differentiate projects visually using per-project colors in `~/.claude-notify/colors.conf`.
+
+**Will this slow down Claude Code?**
+No. Hook scripts run asynchronously and the notification script executes in under 100ms typically. The throttle check exits immediately if within the cooldown window.
+
 ## How it works
 
 Claude Code's [hooks system](https://docs.anthropic.com/en/docs/claude-code) fires events as JSON on stdin. This script handles three hook types:
