@@ -55,6 +55,7 @@ All config lives in `~/.claude-notify/` (override with `CLAUDE_NOTIFY_DIR` env v
 | `CLAUDE_NOTIFY_BOT_NAME` | `Claude Code` | Webhook bot display name |
 | `CLAUDE_NOTIFY_IDLE_COOLDOWN` | `60` | Seconds between idle notifications (per project) |
 | `CLAUDE_NOTIFY_PERMISSION_COOLDOWN` | `60` | Seconds between permission notifications (per project) |
+| `CLAUDE_NOTIFY_CLEANUP_OLD` | `false` | Delete previous message when posting a new one (per project + event type) |
 | `CLAUDE_NOTIFY_ENABLED` | `true` | Set to `false` to disable |
 
 ### Project colors
@@ -70,6 +71,27 @@ docs-site=3066993
 Colors are decimal RGB integers. The project name is the basename of the working directory. Default color is Discord blurple (`5865F2` = `5793266`).
 
 Convert hex to decimal at [spycolor.com](https://www.spycolor.com).
+
+### Message cleanup
+
+By default, every notification creates a new Discord message. To keep your channel clean, enable cleanup mode:
+
+```bash
+# In ~/.claude-notify/.env
+CLAUDE_NOTIFY_CLEANUP_OLD=true
+```
+
+When enabled, posting a new notification will delete the previous message **for the same project and event type**. This means:
+- New `idle_prompt` for `my-app` replaces the old `idle_prompt` for `my-app`
+- But `permission_prompt` messages remain separate
+- Messages from different projects don't interfere with each other
+
+**Use cases:**
+- Keep channel clean when Claude Code frequently goes idle/busy
+- Avoid message spam during long sessions with many subagent updates
+- Maintain a "latest status" view per project
+
+**Note:** Message IDs are stored in `/tmp/claude-notify/` and cleared on reboot.
 
 Common colors:
 | Color | Hex | Decimal |

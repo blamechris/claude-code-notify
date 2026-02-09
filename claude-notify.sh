@@ -36,6 +36,8 @@ if [ -f "$NOTIFY_DIR/.env" ]; then
         CLAUDE_NOTIFY_WEBHOOK=$(grep -m1 '^CLAUDE_NOTIFY_WEBHOOK=' "$NOTIFY_DIR/.env" 2>/dev/null | cut -d= -f2- || true)
     [ -z "${CLAUDE_NOTIFY_BOT_NAME:-}" ] && \
         CLAUDE_NOTIFY_BOT_NAME=$(grep -m1 '^CLAUDE_NOTIFY_BOT_NAME=' "$NOTIFY_DIR/.env" 2>/dev/null | cut -d= -f2- || true)
+    [ -z "${CLAUDE_NOTIFY_CLEANUP_OLD:-}" ] && \
+        CLAUDE_NOTIFY_CLEANUP_OLD=$(grep -m1 '^CLAUDE_NOTIFY_CLEANUP_OLD=' "$NOTIFY_DIR/.env" 2>/dev/null | cut -d= -f2- || true)
 fi
 
 # Check enabled state
@@ -230,12 +232,42 @@ PAYLOAD=$(jq -c -n \
         }]
     }')
 
-HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+# Delete old message if cleanup is enabled
+if [ "${CLAUDE_NOTIFY_CLEANUP_OLD:-false}" = "true" ]; then
+    MESSAGE_ID_FILE="$THROTTLE_DIR/msg-${PROJECT_NAME}-${NOTIFICATION_TYPE}"
+    if [ -f "$MESSAGE_ID_FILE" ]; then
+        OLD_MESSAGE_ID=$(cat "$MESSAGE_ID_FILE" 2>/dev/null || true)
+        if [ -n "$OLD_MESSAGE_ID" ]; then
+            # Extract webhook ID and token from URL for message deletion
+            WEBHOOK_ID_TOKEN=$(echo "$CLAUDE_NOTIFY_WEBHOOK" | sed -n 's|.*/webhooks/\([0-9]*/[^/?]*\).*|\1|p')
+            if [ -n "$WEBHOOK_ID_TOKEN" ]; then
+                curl -s -o /dev/null -X DELETE \
+                    "https://discord.com/api/webhooks/${WEBHOOK_ID_TOKEN}/messages/${OLD_MESSAGE_ID}" \
+                    2>/dev/null || true
+            fi
+        fi
+    fi
+fi
+
+# Send new message and capture response
+RESPONSE=$(curl -s -w "\n%{http_code}" \
     -H "Content-Type: application/json" \
     -d "$PAYLOAD" \
-    "$CLAUDE_NOTIFY_WEBHOOK")
+    "$CLAUDE_NOTIFY_WEBHOOK?wait=true")
+
+HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+RESPONSE_BODY=$(echo "$RESPONSE" | sed '$d')
 
 if [ "$HTTP_CODE" != "204" ] && [ "$HTTP_CODE" != "200" ]; then
     echo "claude-notify: webhook failed with HTTP $HTTP_CODE" >&2
     exit 1
+fi
+
+# Save new message ID for future cleanup
+if [ "${CLAUDE_NOTIFY_CLEANUP_OLD:-false}" = "true" ] && [ -n "$RESPONSE_BODY" ]; then
+    MESSAGE_ID=$(echo "$RESPONSE_BODY" | jq -r '.id // empty' 2>/dev/null)
+    if [ -n "$MESSAGE_ID" ]; then
+        MESSAGE_ID_FILE="$THROTTLE_DIR/msg-${PROJECT_NAME}-${NOTIFICATION_TYPE}"
+        echo "$MESSAGE_ID" > "$MESSAGE_ID_FILE"
+    fi
 fi
