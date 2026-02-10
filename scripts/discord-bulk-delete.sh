@@ -80,7 +80,8 @@ while true; do
         LAST_ID="$msg_id"
 
         echo -n "  Deleting $msg_id... "
-        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+        RESP_HEADERS=$(mktemp)
+        HTTP_CODE=$(curl -s -o /dev/null -D "$RESP_HEADERS" -w "%{http_code}" \
             -X DELETE \
             -H "Authorization: Bot $BOT_TOKEN" \
             "https://discord.com/api/v10/channels/$CHANNEL_ID/messages/$msg_id")
@@ -89,8 +90,15 @@ while true; do
             echo "done"
             deleted=$((deleted + 1))
         elif [ "$HTTP_CODE" = "429" ]; then
-            echo "rate limited, waiting..."
-            sleep 5
+            # Parse Retry-After header (seconds), default to 5s
+            RETRY_AFTER=$(grep -i '^retry-after:' "$RESP_HEADERS" 2>/dev/null | tr -d '[:space:]' | cut -d: -f2)
+            RETRY_AFTER="${RETRY_AFTER:-5}"
+            # Sanitize: ensure numeric, clamp to 1-60s
+            [[ "$RETRY_AFTER" =~ ^[0-9]+\.?[0-9]*$ ]] || RETRY_AFTER=5
+            [ "${RETRY_AFTER%.*}" -lt 1 ] 2>/dev/null && RETRY_AFTER=1
+            [ "${RETRY_AFTER%.*}" -gt 60 ] 2>/dev/null && RETRY_AFTER=60
+            echo "rate limited, waiting ${RETRY_AFTER}s..."
+            sleep "$RETRY_AFTER"
             # Retry once
             HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
                 -X DELETE \
@@ -107,6 +115,7 @@ while true; do
             echo "failed (HTTP $HTTP_CODE)"
             failed=$((failed + 1))
         fi
+        rm -f "$RESP_HEADERS"
 
         sleep "$DELETE_DELAY"
     done <<< "$MESSAGE_IDS"

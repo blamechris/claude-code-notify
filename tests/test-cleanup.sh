@@ -123,16 +123,8 @@ assert_eq "Missing var stays empty" "" "${CLAUDE_NOTIFY_SHOW_SESSION_INFO:-}"
 
 # -- safe_write_file tests --
 
-# Inline the function from main script for testing.
-# NOTE: Must stay in sync with safe_write_file() in claude-notify.sh.
-safe_write_file() {
-    local file="$1"
-    local content="$2"
-    if ! echo "$content" > "$file" 2>/dev/null; then
-        echo "claude-notify: warning: failed to write to $file" >&2
-    fi
-    return 0
-}
+# Extract function directly from main script to avoid drift
+eval "$(sed -n '/^safe_write_file()/,/^}/p' "$MAIN_SCRIPT")"
 
 # Successful write
 WRITE_TEST_FILE="$THROTTLE_DIR/safe-write-test"
