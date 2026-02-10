@@ -109,17 +109,22 @@ failed_files=()
 
 printf "=== claude-code-notify test suite ===\n\n"
 
+echo "DEBUG: About to iterate test files..." >&2
 for test_file in "$TESTS_DIR"/test-*.sh; do
-    [ -f "$test_file" ] || continue
+    echo "DEBUG: Found file: $test_file" >&2
+    [ -f "$test_file" ] || { echo "DEBUG: Not a file, skipping" >&2; continue; }
     test_name=$(basename "$test_file" .sh)
     ((total_files++))
+    echo "DEBUG: Running test $total_files: $test_name" >&2
 
     printf "[%s]\n" "$test_name"
 
     # Run in a subshell so each test gets a fresh environment.
     # Capture output and exit code.
+    echo "DEBUG: Executing: bash $test_file" >&2
     output=$(bash "$test_file" 2>&1)
     rc=$?
+    echo "DEBUG: Test exited with code $rc" >&2
 
     echo "$output"
 
