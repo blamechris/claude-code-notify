@@ -80,7 +80,13 @@ build_status_payload() {
             if ! validate_color "$color"; then color="16753920"; fi
             title="🔐 ${PROJECT_NAME} — Needs Approval"
             local detail=""
-            [ -n "$extra" ] && detail=$(echo "$extra" | head -c 300)
+            if [ -n "$extra" ]; then
+                if [ "${#extra}" -gt 1000 ]; then
+                    detail="${extra:0:997}..."
+                else
+                    detail="$extra"
+                fi
+            fi
             local base=$(jq -c -n \
                 --arg detail "$detail" \
                 'if $detail != "" then
@@ -100,6 +106,14 @@ build_status_payload() {
             if ! validate_color "$color"; then color="15158332"; fi
             title="🔴 ${PROJECT_NAME} — Session Offline"
             local base=$(jq -c -n '[{"name": "Status", "value": "Session ended", "inline": false}]')
+            fields=$(jq -c -n --argjson base "$base" --argjson extra "$extra_fields" '$base + $extra')
+            ;;
+        *)
+            echo "claude-notify: warning: unknown state '$state', defaulting to online" >&2
+            color="${CLAUDE_NOTIFY_ONLINE_COLOR:-3066993}"
+            if ! validate_color "$color"; then color="3066993"; fi
+            title="🟢 ${PROJECT_NAME} — Session Online"
+            local base=$(jq -c -n '[{"name": "Status", "value": "Session started", "inline": false}]')
             fields=$(jq -c -n --argjson base "$base" --argjson extra "$extra_fields" '$base + $extra')
             ;;
     esac
@@ -178,19 +192,28 @@ payload_nomsg=$(build_status_payload "permission" "")
 field_count=$(echo "$payload_nomsg" | jq '.embeds[0].fields | length')
 assert_eq "permission with no message has empty fields array" "0" "$field_count"
 
-# 6. Permission detail truncation (300 chars max)
-long_message=$(printf 'A%.0s' {1..500})
+# 6. Permission detail truncation (1000 chars max with ellipsis)
+long_message=$(printf 'A%.0s' {1..1500})
 payload_long=$(build_status_payload "permission" "$long_message")
 detail_long=$(echo "$payload_long" | jq -r '.embeds[0].fields[0].value')
 detail_len=${#detail_long}
 
-if [ "$detail_len" -le 300 ]; then
-    printf "  PASS: Long message truncated to %d chars (<= 300)\n" "$detail_len"
+if [ "$detail_len" -le 1000 ]; then
+    printf "  PASS: Long message truncated to %d chars (<= 1000)\n" "$detail_len"
     ((pass++))
 else
-    printf "  FAIL: Long message not truncated (length = %d, expected <= 300)\n" "$detail_len"
+    printf "  FAIL: Long message not truncated (length = %d, expected <= 1000)\n" "$detail_len"
     ((fail++))
 fi
+
+# 6b. Truncated message ends with ellipsis
+assert_match "Truncated message ends with '...'" '\.\.\.$' "$detail_long"
+
+# 6c. Message under limit is not truncated
+short_message=$(printf 'B%.0s' {1..500})
+payload_short=$(build_status_payload "permission" "$short_message")
+detail_short=$(echo "$payload_short" | jq -r '.embeds[0].fields[0].value')
+assert_eq "Short message not truncated" "500" "${#detail_short}"
 
 # 7. "approved" state
 payload_approved=$(build_status_payload "approved")

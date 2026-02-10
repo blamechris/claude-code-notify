@@ -31,7 +31,10 @@ export PATH="/usr/local/bin:/opt/homebrew/bin:$PATH"
 NOTIFY_DIR="${CLAUDE_NOTIFY_DIR:-$HOME/.claude-notify}"
 THROTTLE_DIR="/tmp/claude-notify"
 
-mkdir -p "$THROTTLE_DIR"
+if ! mkdir -p "$THROTTLE_DIR" 2>/dev/null || [ ! -d "$THROTTLE_DIR" ] || [ ! -w "$THROTTLE_DIR" ]; then
+    echo "claude-notify: cannot create or write to $THROTTLE_DIR" >&2
+    exit 1
+fi
 
 # Load config from .env file (env vars take precedence)
 if [ -f "$NOTIFY_DIR/.env" ]; then
@@ -70,7 +73,7 @@ command -v jq &>/dev/null || { echo "claude-notify: jq is required (brew install
 
 # -- Parse hook input --
 
-read -t 5 -r -d '' INPUT || true
+INPUT=$(cat 2>/dev/null) || true
 HOOK_EVENT=$(echo "$INPUT" | jq -r '.hook_event_name // empty' 2>/dev/null)
 [ -z "$HOOK_EVENT" ] && HOOK_EVENT="${1:-}"
 [ -z "$HOOK_EVENT" ] && exit 0
@@ -158,7 +161,11 @@ build_extra_fields() {
 
         # Tool input (truncated for safety)
         if [ -n "$TOOL_INPUT" ] && [ "$TOOL_INPUT" != "null" ]; then
-            local tool_detail=$(echo "$TOOL_INPUT" | jq -r 'if type == "object" then (.command // .file_path // "...") else . end' 2>/dev/null | head -c 200)
+            local raw_detail=$(echo "$TOOL_INPUT" | jq -r 'if type == "object" then (.command // .file_path // "...") else . end' 2>/dev/null)
+            local tool_detail="$raw_detail"
+            if [ "${#raw_detail}" -gt 1000 ]; then
+                tool_detail="${raw_detail:0:997}..."
+            fi
             if [ -n "$tool_detail" ] && [ "$tool_detail" != "null" ]; then
                 extra_fields=$(echo "$extra_fields" | jq -c --arg detail "$tool_detail" '. + [{"name": "Command", "value": $detail, "inline": false}]')
             fi
@@ -188,10 +195,18 @@ write_status_msg_id() {
     echo "$1" > "$THROTTLE_DIR/status-msg-${PROJECT_NAME}"
 }
 
+# Clear status/throttle/subagent files for a project.
+# Pass "keep_msg_id" to preserve the Discord message ID
+# (SessionEnd needs this so the next SessionStart can delete the offline message).
 clear_status_files() {
-    rm -f "$THROTTLE_DIR/status-msg-${PROJECT_NAME}" 2>/dev/null || true
+    local mode="${1:-}"
+    if [ "$mode" != "keep_msg_id" ]; then
+        rm -f "$THROTTLE_DIR/status-msg-${PROJECT_NAME}" 2>/dev/null || true
+    fi
     rm -f "$THROTTLE_DIR/status-state-${PROJECT_NAME}" 2>/dev/null || true
     rm -f "$THROTTLE_DIR/last-idle-count-${PROJECT_NAME}" 2>/dev/null || true
+    rm -f "$THROTTLE_DIR/subagent-count-${PROJECT_NAME}" 2>/dev/null || true
+    rm -f "$THROTTLE_DIR/last-idle-busy-${PROJECT_NAME}" 2>/dev/null || true
 }
 
 # -- Project colors (Discord embed sidebar, decimal RGB) --
@@ -264,7 +279,13 @@ build_status_payload() {
             fi
             title="🔐 ${PROJECT_NAME} — Needs Approval"
             local detail=""
-            [ -n "$extra" ] && detail=$(echo "$extra" | head -c 300)
+            if [ -n "$extra" ]; then
+                if [ "${#extra}" -gt 1000 ]; then
+                    detail="${extra:0:997}..."
+                else
+                    detail="$extra"
+                fi
+            fi
             local base=$(jq -c -n \
                 --arg detail "$detail" \
                 'if $detail != "" then
@@ -421,25 +442,36 @@ throttle_check() {
 
 # -- Subagent tracking (no webhook needed) --
 
-if [ "$HOOK_EVENT" = "SubagentStart" ]; then
+if [ "$HOOK_EVENT" = "SubagentStart" ] || [ "$HOOK_EVENT" = "SubagentStop" ]; then
     LOCK="$SUBAGENT_COUNT_FILE.lock"
-    while ! mkdir "$LOCK" 2>/dev/null; do sleep 0.01; done
-    COUNT=0
-    [ -f "$SUBAGENT_COUNT_FILE" ] && COUNT=$(cat "$SUBAGENT_COUNT_FILE" 2>/dev/null || echo 0)
-    echo $(( COUNT + 1 )) > "$SUBAGENT_COUNT_FILE"
-    rmdir "$LOCK" 2>/dev/null || true
-    exit 0
-fi
+    # Acquire lock (break stale locks older than 10s)
+    LOCK_ATTEMPTS=0
+    while ! mkdir "$LOCK" 2>/dev/null; do
+        if [ -d "$LOCK" ] && [ $(($(date +%s) - $(stat -f %m "$LOCK" 2>/dev/null || stat -c %Y "$LOCK" 2>/dev/null || echo 0))) -gt 10 ]; then
+            rmdir "$LOCK" 2>/dev/null || true
+        fi
+        LOCK_ATTEMPTS=$((LOCK_ATTEMPTS + 1))
+        if [ "$LOCK_ATTEMPTS" -gt 100 ]; then
+            echo "claude-notify: warning: could not acquire subagent lock after 100 attempts, proceeding unlocked" >&2
+            break
+        fi
+        sleep 0.01
+    done
+    trap 'rmdir "$LOCK" 2>/dev/null || true' EXIT
 
-if [ "$HOOK_EVENT" = "SubagentStop" ]; then
-    LOCK="$SUBAGENT_COUNT_FILE.lock"
-    while ! mkdir "$LOCK" 2>/dev/null; do sleep 0.01; done
     COUNT=0
     [ -f "$SUBAGENT_COUNT_FILE" ] && COUNT=$(cat "$SUBAGENT_COUNT_FILE" 2>/dev/null || echo 0)
-    NEW_COUNT=$(( COUNT - 1 ))
-    [ "$NEW_COUNT" -lt 0 ] && NEW_COUNT=0
-    echo "$NEW_COUNT" > "$SUBAGENT_COUNT_FILE"
+
+    if [ "$HOOK_EVENT" = "SubagentStart" ]; then
+        echo $(( COUNT + 1 )) > "$SUBAGENT_COUNT_FILE"
+    else
+        NEW_COUNT=$(( COUNT - 1 ))
+        [ "$NEW_COUNT" -lt 0 ] && NEW_COUNT=0
+        echo "$NEW_COUNT" > "$SUBAGENT_COUNT_FILE"
+    fi
+
     rmdir "$LOCK" 2>/dev/null || true
+    trap - EXIT
     exit 0
 fi
 
@@ -467,7 +499,7 @@ if [ "$HOOK_EVENT" = "SessionEnd" ]; then
     if [ -n "$CURRENT_STATE" ] && [ "$CURRENT_STATE" != "offline" ]; then
         patch_status_message "offline"
     fi
-    clear_status_files
+    clear_status_files "keep_msg_id"
     exit 0
 fi
 
@@ -487,11 +519,10 @@ fi
 
 # -- Notification handler --
 
-[ -z "${CLAUDE_NOTIFY_WEBHOOK:-}" ] && { echo "claude-notify: CLAUDE_NOTIFY_WEBHOOK not set. Run install.sh or set the env var." >&2; exit 1; }
-
-# -- Dependencies (curl required for webhook delivery) --
-
+# Check curl before webhook (curl is needed to use the webhook)
 command -v curl &>/dev/null || { echo "claude-notify: curl is required" >&2; exit 1; }
+
+[ -z "${CLAUDE_NOTIFY_WEBHOOK:-}" ] && { echo "claude-notify: CLAUDE_NOTIFY_WEBHOOK not set. Run install.sh or set the env var." >&2; exit 1; }
 
 # -- Parse notification fields --
 
@@ -525,9 +556,7 @@ case "$NOTIFICATION_TYPE" in
         ;;
 
     permission_prompt)
-        DETAIL=""
-        [ -n "$MESSAGE" ] && DETAIL=$(echo "$MESSAGE" | head -c 300)
-        repost_status_message "permission" "$DETAIL"
+        repost_status_message "permission" "${MESSAGE:-}"
         ;;
 
     *)
