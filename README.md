@@ -63,6 +63,9 @@ All config lives in `~/.claude-notify/` (override with `CLAUDE_NOTIFY_DIR` env v
 | `CLAUDE_NOTIFY_APPROVAL_TTL` | `1` | Hours to keep approved permissions before cleanup (time-based cleanup script) |
 | `CLAUDE_NOTIFY_CLEANUP_OLD` | `false` | Delete previous message when posting a new one (per project + event type) |
 | `CLAUDE_NOTIFY_ENABLED` | `true` | Set to `false` to disable |
+| `CLAUDE_NOTIFY_SHOW_SESSION_INFO` | `false` | Show session ID and permission mode in notifications |
+| `CLAUDE_NOTIFY_SHOW_TOOL_INFO` | `false` | Show tool name and command details (for permissions) |
+| `CLAUDE_NOTIFY_SHOW_FULL_PATH` | `false` | Show full working directory path instead of project name |
 | `DISCORD_BOT_TOKEN` | *(optional)* | Bot token for bulk operations (channel cleanup, not needed for hooks) |
 | `DISCORD_DELETE_DELAY` | `0.5` | Seconds between deletions in bulk delete script (rate limiting) |
 
@@ -121,6 +124,38 @@ CLAUDE_NOTIFY_APPROVAL_TTL=2  # Keep approvals for 2 hours
 ```
 
 This keeps your Discord channel clean while maintaining recent approval history.
+
+### Extra context in notifications
+
+By default, notifications show minimal information (project name, status). You can enable additional context fields:
+
+```bash
+# In ~/.claude-notify/.env
+
+# Show session ID and permission mode
+CLAUDE_NOTIFY_SHOW_SESSION_INFO=true
+
+# Show tool name and command details (for permissions)
+CLAUDE_NOTIFY_SHOW_TOOL_INFO=true
+
+# Show full working directory path instead of just project name
+CLAUDE_NOTIFY_SHOW_FULL_PATH=true
+```
+
+**What you'll see with these enabled:**
+
+**Session info:**
+- Session ID (shortened to 8 chars for brevity)
+- Permission mode (default, permissive, auto-approve, etc.)
+
+**Tool info (permissions only):**
+- Tool name (Bash, Edit, Write, etc.)
+- Command or operation details (truncated to 200 chars for safety)
+
+**Full path:**
+- Complete working directory path instead of basename
+
+These flags default to `false` to keep notifications clean. Enable them when you need more diagnostic information or are managing multiple sessions.
 
 Common colors:
 | Color | Hex | Decimal |

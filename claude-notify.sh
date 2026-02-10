@@ -65,6 +65,12 @@ PROJECT_NAME="unknown"
 [ -n "$CWD" ] && PROJECT_NAME=$(basename "$CWD")
 PROJECT_NAME=$(echo "$PROJECT_NAME" | tr -cd 'A-Za-z0-9._-')
 
+# Extract additional context fields (for optional display)
+SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
+PERMISSION_MODE=$(echo "$INPUT" | jq -r '.permission_mode // empty' 2>/dev/null)
+TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // empty' 2>/dev/null)
+TOOL_INPUT=$(echo "$INPUT" | jq -r '.tool_input // empty' 2>/dev/null)
+
 # Per-project subagent count file
 SUBAGENT_COUNT_FILE="$THROTTLE_DIR/subagent-count-${PROJECT_NAME}"
 
@@ -122,21 +128,23 @@ if [ "$HOOK_EVENT" = "PostToolUse" ]; then
                     TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
                     BOT_NAME="${CLAUDE_NOTIFY_BOT_NAME:-Claude Code}"
 
+                    # Build fields with optional extra context
+                    BASE_FIELDS=$(jq -c -n '[{"name": "Status", "value": "Permission granted, tool executed successfully", "inline": false}]')
+                    EXTRA_FIELDS=$(build_extra_fields)
+                    APPROVAL_FIELDS=$(jq -c -n --argjson base "$BASE_FIELDS" --argjson extra "$EXTRA_FIELDS" '$base + $extra')
+
                     PAYLOAD=$(jq -c -n \
                         --arg username "$BOT_NAME" \
                         --arg title "✅ ${PROJECT_NAME} — Permission Approved" \
                         --argjson color "$APPROVAL_COLOR" \
+                        --argjson fields "$APPROVAL_FIELDS" \
                         --arg ts "$TIMESTAMP" \
                         '{
                             username: $username,
                             embeds: [{
                                 title: $title,
                                 color: $color,
-                                fields: [{
-                                    name: "Status",
-                                    value: "Permission granted, tool executed successfully",
-                                    inline: false
-                                }],
+                                fields: $fields,
                                 footer: { text: "Claude Code" },
                                 timestamp: $ts
                             }]
@@ -231,6 +239,42 @@ get_status_emoji() {
     esac
 }
 
+# -- Build extra context fields (if enabled) --
+build_extra_fields() {
+    local extra_fields="[]"
+
+    # Session info (session ID, permission mode)
+    if [ "${CLAUDE_NOTIFY_SHOW_SESSION_INFO:-false}" = "true" ]; then
+        if [ -n "$SESSION_ID" ]; then
+            local short_id="${SESSION_ID:0:8}"
+            extra_fields=$(echo "$extra_fields" | jq -c --arg id "$short_id" '. + [{"name": "Session", "value": $id, "inline": true}]')
+        fi
+        if [ -n "$PERMISSION_MODE" ]; then
+            extra_fields=$(echo "$extra_fields" | jq -c --arg mode "$PERMISSION_MODE" '. + [{"name": "Permission Mode", "value": $mode, "inline": true}]')
+        fi
+    fi
+
+    # Full path (instead of just project name)
+    if [ "${CLAUDE_NOTIFY_SHOW_FULL_PATH:-false}" = "true" ] && [ -n "$CWD" ]; then
+        extra_fields=$(echo "$extra_fields" | jq -c --arg path "$CWD" '. + [{"name": "Path", "value": $path, "inline": false}]')
+    fi
+
+    # Tool info (for permissions)
+    if [ "${CLAUDE_NOTIFY_SHOW_TOOL_INFO:-false}" = "true" ] && [ -n "$TOOL_NAME" ]; then
+        extra_fields=$(echo "$extra_fields" | jq -c --arg tool "$TOOL_NAME" '. + [{"name": "Tool", "value": $tool, "inline": true}]')
+
+        # Tool input (truncated for safety)
+        if [ -n "$TOOL_INPUT" ] && [ "$TOOL_INPUT" != "null" ]; then
+            local tool_detail=$(echo "$TOOL_INPUT" | jq -r 'if type == "object" then (.command // .file_path // "...") else . end' 2>/dev/null | head -c 200)
+            if [ -n "$tool_detail" ] && [ "$tool_detail" != "null" ]; then
+                extra_fields=$(echo "$extra_fields" | jq -c --arg detail "$tool_detail" '. + [{"name": "Command", "value": $detail, "inline": false}]')
+            fi
+        fi
+    fi
+
+    echo "$extra_fields"
+}
+
 # -- Throttle helper --
 throttle_check() {
     local lock_file="$THROTTLE_DIR/last-${1}"
@@ -267,12 +311,14 @@ case "$NOTIFICATION_TYPE" in
 
             EMOJI=$(get_status_emoji "idle_busy")
             TITLE="${EMOJI} ${PROJECT_NAME} — Idle"
-            FIELDS=$(jq -c -n \
+            BASE_FIELDS=$(jq -c -n \
                 --arg subs "**${SUBAGENTS}** running" \
                 '[
                     {"name": "Status",    "value": "Main loop idle, waiting for subagents", "inline": false},
                     {"name": "Subagents", "value": $subs, "inline": true}
                 ]')
+            EXTRA_FIELDS=$(build_extra_fields)
+            FIELDS=$(jq -c -n --argjson base "$BASE_FIELDS" --argjson extra "$EXTRA_FIELDS" '$base + $extra')
         else
             # Clear last count so next subagent session starts fresh
             rm -f "$THROTTLE_DIR/last-idle-count-${PROJECT_NAME}"
@@ -280,8 +326,10 @@ case "$NOTIFICATION_TYPE" in
 
             EMOJI=$(get_status_emoji "idle_ready")
             TITLE="${EMOJI} ${PROJECT_NAME} — Ready for input"
-            FIELDS=$(jq -c -n \
+            BASE_FIELDS=$(jq -c -n \
                 '[{"name": "Status", "value": "Waiting for input", "inline": false}]')
+            EXTRA_FIELDS=$(build_extra_fields)
+            FIELDS=$(jq -c -n --argjson base "$BASE_FIELDS" --argjson extra "$EXTRA_FIELDS" '$base + $extra')
         fi
         ;;
 
@@ -291,11 +339,13 @@ case "$NOTIFICATION_TYPE" in
         TITLE="${EMOJI} ${PROJECT_NAME} — Needs Approval"
         DETAIL=""
         [ -n "$MESSAGE" ] && DETAIL=$(echo "$MESSAGE" | head -c 300)
-        FIELDS=$(jq -c -n \
+        BASE_FIELDS=$(jq -c -n \
             --arg detail "$DETAIL" \
             'if $detail != "" then
                 [{"name": "Detail", "value": $detail, "inline": false}]
              else [] end')
+        EXTRA_FIELDS=$(build_extra_fields)
+        FIELDS=$(jq -c -n --argjson base "$BASE_FIELDS" --argjson extra "$EXTRA_FIELDS" '$base + $extra')
         ;;
 
     *)
