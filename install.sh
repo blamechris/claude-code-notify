@@ -27,13 +27,19 @@ info()  { printf "${GREEN}[info]${NC} %s\n" "$1"; }
 warn()  { printf "${YELLOW}[warn]${NC} %s\n" "$1"; }
 error() { printf "${RED}[error]${NC} %s\n" "$1" >&2; }
 
+# -- Temp file cleanup --
+
+TEMP_FILES=()
+cleanup_temp() { for f in "${TEMP_FILES[@]}"; do rm -f "$f" 2>/dev/null; done; }
+trap cleanup_temp EXIT
+
 # -- Uninstall --
 
 if [ "${1:-}" = "--uninstall" ]; then
     info "Removing claude-code-notify hooks from settings.json..."
     if [ -f "$SETTINGS_FILE" ] && command -v jq &>/dev/null; then
         # Remove hooks that reference claude-notify.sh
-        TEMP=$(mktemp)
+        TEMP=$(mktemp); TEMP_FILES+=("$TEMP")
         jq --arg script "$NOTIFY_SCRIPT" '
             .hooks |= (
                 if .Notification then
@@ -149,7 +155,7 @@ else
     # Build the hook entries
     HOOK_CMD=$(jq -c -n --arg cmd "$NOTIFY_SCRIPT" '{type: "command", command: $cmd}')
 
-    TEMP=$(mktemp)
+    TEMP=$(mktemp); TEMP_FILES+=("$TEMP")
     jq --argjson hook "$HOOK_CMD" '
         .hooks //= {}
         | .hooks.Notification //= []
