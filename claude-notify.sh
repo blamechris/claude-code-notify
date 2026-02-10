@@ -186,6 +186,20 @@ build_extra_fields() {
     echo "$extra_fields"
 }
 
+# -- Safe file write helper --
+
+# Write content to a file, logging a warning on failure.
+# Always returns 0 — hook should continue even if state files fail.
+# (Returning non-zero under set -euo pipefail would crash the script.)
+safe_write_file() {
+    local file="$1"
+    local content="$2"
+    if ! echo "$content" > "$file" 2>/dev/null; then
+        echo "claude-notify: warning: failed to write to $file" >&2
+    fi
+    return 0
+}
+
 # -- Status state helpers --
 
 read_status_state() {
@@ -194,7 +208,7 @@ read_status_state() {
 }
 
 write_status_state() {
-    echo "$1" > "$THROTTLE_DIR/status-state-${PROJECT_NAME}"
+    safe_write_file "$THROTTLE_DIR/status-state-${PROJECT_NAME}" "$1"
 }
 
 read_status_msg_id() {
@@ -203,7 +217,7 @@ read_status_msg_id() {
 }
 
 write_status_msg_id() {
-    echo "$1" > "$THROTTLE_DIR/status-msg-${PROJECT_NAME}"
+    safe_write_file "$THROTTLE_DIR/status-msg-${PROJECT_NAME}" "$1"
 }
 
 # Clear status/throttle/subagent files for a project.
@@ -447,7 +461,7 @@ throttle_check() {
         local now=$(date +%s)
         [ $(( now - last_sent )) -lt "$cooldown" ] && return 1
     fi
-    date +%s > "$lock_file"
+    safe_write_file "$lock_file" "$(date +%s)"
     return 0
 }
 
@@ -474,11 +488,11 @@ if [ "$HOOK_EVENT" = "SubagentStart" ] || [ "$HOOK_EVENT" = "SubagentStop" ]; th
     [ -f "$SUBAGENT_COUNT_FILE" ] && COUNT=$(cat "$SUBAGENT_COUNT_FILE" 2>/dev/null || echo 0)
 
     if [ "$HOOK_EVENT" = "SubagentStart" ]; then
-        echo $(( COUNT + 1 )) > "$SUBAGENT_COUNT_FILE"
+        safe_write_file "$SUBAGENT_COUNT_FILE" "$(( COUNT + 1 ))"
     else
         NEW_COUNT=$(( COUNT - 1 ))
         [ "$NEW_COUNT" -lt 0 ] && NEW_COUNT=0
-        echo "$NEW_COUNT" > "$SUBAGENT_COUNT_FILE"
+        safe_write_file "$SUBAGENT_COUNT_FILE" "$NEW_COUNT"
     fi
 
     rmdir "$LOCK" 2>/dev/null || true
@@ -553,7 +567,7 @@ case "$NOTIFICATION_TYPE" in
             [ "$SUBAGENTS" = "$LAST_COUNT" ] && exit 0
             # Minimum 15s between subagent-count updates (prevent Discord rate limiting)
             throttle_check "idle-busy-${PROJECT_NAME}" 15 || exit 0
-            echo "$SUBAGENTS" > "$LAST_COUNT_FILE"
+            safe_write_file "$LAST_COUNT_FILE" "$SUBAGENTS"
 
             repost_status_message "idle_busy" "$SUBAGENTS"
         else

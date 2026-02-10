@@ -121,6 +121,44 @@ unset CLAUDE_NOTIFY_SHOW_SESSION_INFO 2>/dev/null || true
 load_env_var CLAUDE_NOTIFY_SHOW_SESSION_INFO
 assert_eq "Missing var stays empty" "" "${CLAUDE_NOTIFY_SHOW_SESSION_INFO:-}"
 
+# -- safe_write_file tests --
+
+# Inline the function from main script for testing.
+# NOTE: Must stay in sync with safe_write_file() in claude-notify.sh.
+safe_write_file() {
+    local file="$1"
+    local content="$2"
+    if ! echo "$content" > "$file" 2>/dev/null; then
+        echo "claude-notify: warning: failed to write to $file" >&2
+    fi
+    return 0
+}
+
+# Successful write
+WRITE_TEST_FILE="$THROTTLE_DIR/safe-write-test"
+safe_write_file "$WRITE_TEST_FILE" "hello"
+assert_eq "safe_write_file writes content" "hello" "$(cat "$WRITE_TEST_FILE")"
+
+# Overwrite existing file
+safe_write_file "$WRITE_TEST_FILE" "world"
+assert_eq "safe_write_file overwrites content" "world" "$(cat "$WRITE_TEST_FILE")"
+
+# Write to non-existent directory returns 0 (graceful, won't crash under set -e)
+RESULT=0
+safe_write_file "/nonexistent-path/test" "fail" 2>/dev/null || RESULT=$?
+assert_eq "safe_write_file returns 0 even on failure" "0" "$RESULT"
+
+# Failure emits warning to stderr
+STDERR_OUTPUT=$(safe_write_file "/nonexistent-path/test" "fail" 2>&1 >/dev/null)
+assert_match "safe_write_file warns on failure" "warning.*failed to write" "$STDERR_OUTPUT"
+
+# Write empty content
+safe_write_file "$WRITE_TEST_FILE" ""
+EMPTY_CONTENT=$(cat "$WRITE_TEST_FILE")
+assert_eq "safe_write_file handles empty content" "" "$EMPTY_CONTENT"
+
+rm -f "$WRITE_TEST_FILE"
+
 # -- JSON validation tests --
 
 # Valid JSON passes
