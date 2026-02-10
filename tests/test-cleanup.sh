@@ -98,13 +98,8 @@ CLAUDE_NOTIFY_WEBHOOK=https://discord.com/api/webhooks/123/abc
 CLAUDE_NOTIFY_BOT_NAME=Test Bot
 ENVFILE
 
-load_env_var() {
-    local var_name="$1"
-    eval "[ -z \"\${${var_name}:-}\" ]" || return 0
-    local val
-    val=$(grep -m1 "^${var_name}=" "$NOTIFY_DIR/.env" 2>/dev/null | cut -d= -f2- || true)
-    [ -n "$val" ] && eval "${var_name}=\$val" || true
-}
+# Extract function directly from main script to avoid drift
+eval "$(sed -n '/^load_env_var()/,/^}/p' "$MAIN_SCRIPT")"
 
 # Loads value from .env when not set
 unset CLAUDE_NOTIFY_BOT_NAME 2>/dev/null || true
