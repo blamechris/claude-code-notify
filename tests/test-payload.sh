@@ -1,15 +1,13 @@
 #!/bin/bash
-# test-payload.sh -- Tests for Discord webhook payload construction
+# test-payload.sh -- Tests for build_status_payload across all 6 states
 #
 # Verifies that:
-#   - idle_prompt generates valid JSON with correct title format
-#   - permission_prompt generates valid JSON with detail field
-#   - Long messages get truncated to 300 chars
-#   - jq can parse the generated payload
-#   - Embed structure has required fields (title, color, fields, footer, timestamp)
-#
-# We reconstruct the payload-building logic from claude-notify.sh to test it
-# in isolation, without needing a real webhook URL or curl.
+#   - All 6 states generate valid JSON
+#   - Titles contain correct emoji and project name
+#   - Colors match expected defaults
+#   - Embed structure has required fields
+#   - Permission detail truncation works
+#   - idle_busy shows subagent count
 
 set -uo pipefail
 
@@ -18,64 +16,91 @@ set -uo pipefail
 
 source "$HELPER_FILE"
 
-# -- Helper functions replicated from claude-notify.sh --
+# -- Helper: replicate build_status_payload from claude-notify.sh --
+# We test payload building in isolation (no curl, no webhook)
 
-get_status_emoji() {
-    case "$1" in
-        idle_ready)    echo "🟢" ;;
-        idle_busy)     echo "🔄" ;;
-        permission)    echo "🔐" ;;
-        *)             echo "📝" ;;
-    esac
+PROJECT_NAME="my-project"
+SESSION_ID=""
+PERMISSION_MODE=""
+TOOL_NAME=""
+TOOL_INPUT=""
+CWD=""
+NOTIFY_DIR="$TEST_TMPDIR/notify-config"
+
+# Stub build_extra_fields (no extra context in tests)
+build_extra_fields() { echo "[]"; }
+
+# Stub validate_color
+validate_color() {
+    local color="$1"
+    if [ -n "$color" ] && [[ "$color" =~ ^[0-9]+$ ]] && [ "$color" -ge 0 ] && [ "$color" -le 16777215 ]; then
+        return 0
+    fi
+    return 1
 }
 
-# Build a payload the same way the main script does.
-build_payload() {
-    local notification_type="$1"
-    local project_name="$2"
-    local message="${3:-}"
-    local subagents="${4:-0}"
-    local color="${5:-5793266}"
-    local bot_name="${6:-Claude Code}"
-    local timestamp
-    timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-    local title fields emoji
+# Stub get_project_color
+get_project_color() { echo 5793266; }
 
-    case "$notification_type" in
-        idle_prompt)
-            if [ "$subagents" -gt 0 ]; then
-                emoji=$(get_status_emoji "idle_busy")
-                title="${emoji} ${project_name} — Idle"
-                fields=$(jq -c -n \
-                    --arg subs "**${subagents}** running" \
-                    '[
-                        {"name": "Status",    "value": "Main loop idle, waiting for subagents", "inline": false},
-                        {"name": "Subagents", "value": $subs, "inline": true}
-                    ]')
-            else
-                emoji=$(get_status_emoji "idle_ready")
-                title="${emoji} ${project_name} — Ready for input"
-                fields=$(jq -c -n \
-                    '[{"name": "Status", "value": "Waiting for input", "inline": false}]')
-            fi
+build_status_payload() {
+    local state="$1"
+    local extra="${2:-}"
+    local title color fields
+    local timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    local bot_name="${CLAUDE_NOTIFY_BOT_NAME:-Claude Code}"
+    local extra_fields=$(build_extra_fields)
+
+    case "$state" in
+        online)
+            color="${CLAUDE_NOTIFY_ONLINE_COLOR:-3066993}"
+            if ! validate_color "$color"; then color="3066993"; fi
+            title="🟢 ${PROJECT_NAME} — Session Online"
+            local base=$(jq -c -n '[{"name": "Status", "value": "Session started", "inline": false}]')
+            fields=$(jq -c -n --argjson base "$base" --argjson extra "$extra_fields" '$base + $extra')
             ;;
-
-        permission_prompt)
-            emoji=$(get_status_emoji "permission")
-            title="${emoji} ${project_name} — Needs Approval"
+        idle)
+            color=$(get_project_color "$PROJECT_NAME")
+            title="🦀 ${PROJECT_NAME} — Ready for input"
+            local base=$(jq -c -n '[{"name": "Status", "value": "Waiting for input", "inline": false}]')
+            fields=$(jq -c -n --argjson base "$base" --argjson extra "$extra_fields" '$base + $extra')
+            ;;
+        idle_busy)
+            color=$(get_project_color "$PROJECT_NAME")
+            title="🔄 ${PROJECT_NAME} — Idle"
+            local base=$(jq -c -n \
+                --arg subs "**${extra}** running" \
+                '[
+                    {"name": "Status", "value": "Main loop idle, waiting for subagents", "inline": false},
+                    {"name": "Subagents", "value": $subs, "inline": true}
+                ]')
+            fields=$(jq -c -n --argjson base "$base" --argjson extra "$extra_fields" '$base + $extra')
+            ;;
+        permission)
+            color="${CLAUDE_NOTIFY_PERMISSION_COLOR:-16753920}"
+            if ! validate_color "$color"; then color="16753920"; fi
+            title="🔐 ${PROJECT_NAME} — Needs Approval"
             local detail=""
-            [ -n "$message" ] && detail=$(echo "$message" | head -c 300)
-            fields=$(jq -c -n \
+            [ -n "$extra" ] && detail=$(echo "$extra" | head -c 300)
+            local base=$(jq -c -n \
                 --arg detail "$detail" \
                 'if $detail != "" then
                     [{"name": "Detail", "value": $detail, "inline": false}]
                  else [] end')
+            fields=$(jq -c -n --argjson base "$base" --argjson extra "$extra_fields" '$base + $extra')
             ;;
-
-        *)
-            emoji=$(get_status_emoji "other")
-            title="${emoji} ${project_name} — ${notification_type:-notification}"
-            fields="[]"
+        approved)
+            color="${CLAUDE_NOTIFY_APPROVAL_COLOR:-3066993}"
+            if ! validate_color "$color"; then color="3066993"; fi
+            title="✅ ${PROJECT_NAME} — Permission Approved"
+            local base=$(jq -c -n '[{"name": "Status", "value": "Permission granted, tool executed successfully", "inline": false}]')
+            fields=$(jq -c -n --argjson base "$base" --argjson extra "$extra_fields" '$base + $extra')
+            ;;
+        offline)
+            color="${CLAUDE_NOTIFY_OFFLINE_COLOR:-15158332}"
+            if ! validate_color "$color"; then color="15158332"; fi
+            title="🔴 ${PROJECT_NAME} — Session Offline"
+            local base=$(jq -c -n '[{"name": "Status", "value": "Session ended", "inline": false}]')
+            fields=$(jq -c -n --argjson base "$base" --argjson extra "$extra_fields" '$base + $extra')
             ;;
     esac
 
@@ -99,44 +124,63 @@ build_payload() {
 
 # -- Tests --
 
-# 1. idle_prompt generates valid JSON that jq can parse
-payload=$(build_payload "idle_prompt" "my-project" "" 0)
-assert_true "idle_prompt payload is valid JSON" \
-    jq -e . <<< "$payload" > /dev/null 2>&1
+# 1. "online" state generates valid JSON
+payload_online=$(build_status_payload "online")
+assert_true "online payload is valid JSON" \
+    jq -e . <<< "$payload_online" > /dev/null 2>&1
 
-# 2. idle_prompt title contains project name and "Ready for input"
-title=$(echo "$payload" | jq -r '.embeds[0].title')
-assert_match "idle_prompt title contains project name" "my-project" "$title"
-assert_match "idle_prompt title contains 'Ready for input'" "Ready for input" "$title"
+title=$(echo "$payload_online" | jq -r '.embeds[0].title')
+assert_match "online title contains project name" "my-project" "$title"
+assert_match "online title contains 'Session Online'" "Session Online" "$title"
 
-# 3. idle_prompt with subagents shows "Idle" title and subagent count
-payload_busy=$(build_payload "idle_prompt" "my-project" "" 3)
+color=$(echo "$payload_online" | jq -r '.embeds[0].color')
+assert_eq "online color is green" "3066993" "$color"
+
+# 2. "idle" state generates valid JSON with correct title
+payload_idle=$(build_status_payload "idle")
+assert_true "idle payload is valid JSON" \
+    jq -e . <<< "$payload_idle" > /dev/null 2>&1
+
+title_idle=$(echo "$payload_idle" | jq -r '.embeds[0].title')
+assert_match "idle title contains 'Ready for input'" "Ready for input" "$title_idle"
+
+color_idle=$(echo "$payload_idle" | jq -r '.embeds[0].color')
+assert_eq "idle color is project color (blurple)" "5793266" "$color_idle"
+
+# 3. "idle_busy" state shows subagent count
+payload_busy=$(build_status_payload "idle_busy" "3")
+assert_true "idle_busy payload is valid JSON" \
+    jq -e . <<< "$payload_busy" > /dev/null 2>&1
+
 title_busy=$(echo "$payload_busy" | jq -r '.embeds[0].title')
-assert_match "idle_prompt with subagents shows 'Idle'" "Idle" "$title_busy"
+assert_match "idle_busy title contains 'Idle'" "Idle" "$title_busy"
 
 subagent_field=$(echo "$payload_busy" | jq -r '.embeds[0].fields[] | select(.name == "Subagents") | .value')
-assert_match "idle_prompt subagent field contains count" "3" "$subagent_field"
+assert_match "idle_busy subagent field contains count" "3" "$subagent_field"
 
-# 4. permission_prompt generates valid JSON with Detail field
-payload_perm=$(build_payload "permission_prompt" "test-proj" "Allow read access to /etc/hosts?")
-assert_true "permission_prompt payload is valid JSON" \
+# 4. "permission" state with detail
+payload_perm=$(build_status_payload "permission" "Allow read access to /etc/hosts?")
+assert_true "permission payload is valid JSON" \
     jq -e . <<< "$payload_perm" > /dev/null 2>&1
 
 title_perm=$(echo "$payload_perm" | jq -r '.embeds[0].title')
-assert_match "permission_prompt title contains 'Needs Approval'" "Needs Approval" "$title_perm"
+assert_match "permission title contains 'Needs Approval'" "Needs Approval" "$title_perm"
+
+color_perm=$(echo "$payload_perm" | jq -r '.embeds[0].color')
+assert_eq "permission color is orange" "16753920" "$color_perm"
 
 detail_val=$(echo "$payload_perm" | jq -r '.embeds[0].fields[0].value')
-assert_eq "permission_prompt detail field has message" \
+assert_eq "permission detail field has message" \
     "Allow read access to /etc/hosts?" "$detail_val"
 
-# 5. permission_prompt with empty message has no Detail field
-payload_nomsg=$(build_payload "permission_prompt" "test-proj" "")
+# 5. "permission" with empty detail has no Detail field
+payload_nomsg=$(build_status_payload "permission" "")
 field_count=$(echo "$payload_nomsg" | jq '.embeds[0].fields | length')
-assert_eq "permission_prompt with no message has empty fields array" "0" "$field_count"
+assert_eq "permission with no message has empty fields array" "0" "$field_count"
 
-# 6. Message truncation -- messages longer than 300 chars are truncated
-long_message=$(printf 'A%.0s' {1..500})  # 500 'A' characters
-payload_long=$(build_payload "permission_prompt" "test-proj" "$long_message")
+# 6. Permission detail truncation (300 chars max)
+long_message=$(printf 'A%.0s' {1..500})
+payload_long=$(build_status_payload "permission" "$long_message")
 detail_long=$(echo "$payload_long" | jq -r '.embeds[0].fields[0].value')
 detail_len=${#detail_long}
 
@@ -148,34 +192,54 @@ else
     ((fail++))
 fi
 
-# 7. Embed structure has required fields: title, color, fields, footer, timestamp
+# 7. "approved" state
+payload_approved=$(build_status_payload "approved")
+assert_true "approved payload is valid JSON" \
+    jq -e . <<< "$payload_approved" > /dev/null 2>&1
+
+title_approved=$(echo "$payload_approved" | jq -r '.embeds[0].title')
+assert_match "approved title contains 'Permission Approved'" "Permission Approved" "$title_approved"
+
+color_approved=$(echo "$payload_approved" | jq -r '.embeds[0].color')
+assert_eq "approved color is green" "3066993" "$color_approved"
+
+# 8. "offline" state
+payload_offline=$(build_status_payload "offline")
+assert_true "offline payload is valid JSON" \
+    jq -e . <<< "$payload_offline" > /dev/null 2>&1
+
+title_offline=$(echo "$payload_offline" | jq -r '.embeds[0].title')
+assert_match "offline title contains 'Session Offline'" "Session Offline" "$title_offline"
+
+color_offline=$(echo "$payload_offline" | jq -r '.embeds[0].color')
+assert_eq "offline color is red" "15158332" "$color_offline"
+
+# 9. Embed structure has required fields
 required_keys=("title" "color" "fields" "footer" "timestamp")
 for key in "${required_keys[@]}"; do
-    has_key=$(echo "$payload" | jq -r ".embeds[0] | has(\"$key\")")
+    has_key=$(echo "$payload_online" | jq -r ".embeds[0] | has(\"$key\")")
     assert_eq "Embed has required field '$key'" "true" "$has_key"
 done
 
-# 8. Footer text is "Claude Code"
-footer=$(echo "$payload" | jq -r '.embeds[0].footer.text')
+# 10. Footer text is "Claude Code"
+footer=$(echo "$payload_online" | jq -r '.embeds[0].footer.text')
 assert_eq "Footer text is 'Claude Code'" "Claude Code" "$footer"
 
-# 9. Timestamp matches ISO 8601 format
-ts=$(echo "$payload" | jq -r '.embeds[0].timestamp')
+# 11. Timestamp matches ISO 8601 format
+ts=$(echo "$payload_online" | jq -r '.embeds[0].timestamp')
 assert_match "Timestamp is ISO 8601 format" \
     "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" "$ts"
 
-# 10. Username is set correctly
-username=$(echo "$payload" | jq -r '.username')
+# 12. Username is set correctly
+username=$(echo "$payload_online" | jq -r '.username')
 assert_eq "Username defaults to 'Claude Code'" "Claude Code" "$username"
 
-# 11. Custom bot name
-payload_custom=$(build_payload "idle_prompt" "proj" "" 0 5793266 "My Bot")
+# 13. Custom bot name
+CLAUDE_NOTIFY_BOT_NAME="My Bot"
+payload_custom=$(build_status_payload "online")
 custom_username=$(echo "$payload_custom" | jq -r '.username')
 assert_eq "Custom bot name is set" "My Bot" "$custom_username"
-
-# 12. Color value is a number
-color_val=$(echo "$payload" | jq -r '.embeds[0].color')
-assert_eq "Default color is Discord blurple" "5793266" "$color_val"
+unset CLAUDE_NOTIFY_BOT_NAME
 
 # -- Cleanup and summary --
 

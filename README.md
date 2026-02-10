@@ -8,16 +8,16 @@ Get notified when your Claude Code agents go idle or need permission approval �
 
 ## What it does
 
-Sends color-coded Discord embeds when Claude Code:
+Maintains a **single status message per project** in your Discord channel, updated in-place through the full session lifecycle:
 
-- **Goes idle** — waiting for your input (green indicator)
-- **Has subagents running** — main loop idle but background agents active (blue indicator)
-- **Needs permission** — waiting for approval to run a tool (orange indicator)
-- **Permission approved** — tool executed successfully after approval (green indicator with ✅)
+- **Session Online** — green embed when Claude Code starts (`🟢`)
+- **Ready for input** — project-colored embed when the agent goes idle (`🦀`)
+- **Idle with subagents** — project-colored embed when background agents are running (`🔄`)
+- **Needs Approval** — orange embed when a permission prompt appears (`🔐`)
+- **Permission Approved** — green embed after you approve (`✅`)
+- **Session Offline** — red embed when the session ends (`🔴`)
 
-Permission messages automatically update from orange to green when you approve them, creating an audit trail of all permission decisions.
-
-Each project gets its own embed color, and notifications are throttled to avoid spam (idle: 60s, permission: 60s cooldowns, per-project).
+Each project gets one message that PATCHes through these states. No message spam, no cleanup needed — just a live dashboard of your active sessions.
 
 ## Requirements
 
@@ -56,14 +56,10 @@ All config lives in `~/.claude-notify/` (override with `CLAUDE_NOTIFY_DIR` env v
 | `CLAUDE_NOTIFY_WEBHOOK` | *(required)* | Discord webhook URL |
 | `CLAUDE_NOTIFY_DIR` | `~/.claude-notify` | Config directory path |
 | `CLAUDE_NOTIFY_BOT_NAME` | `Claude Code` | Webhook bot display name |
-| `CLAUDE_NOTIFY_IDLE_COOLDOWN` | `60` | Seconds between idle notifications (per project) |
-| `CLAUDE_NOTIFY_PERMISSION_COOLDOWN` | `60` | Seconds between permission notifications (per project) |
-| `CLAUDE_NOTIFY_PERMISSION_COLOR` | `16753920` | Color for permission prompts (orange #FFA500) - overrides project colors |
-| `CLAUDE_NOTIFY_APPROVAL_COLOR` | `3066993` | Color for approved permissions (green #2ECC71) - auto-updates messages |
-| `CLAUDE_NOTIFY_APPROVAL_TTL` | `1` | Hours to keep approved permissions before cleanup (time-based cleanup script) |
-| `CLAUDE_NOTIFY_ONLINE_COLOR` | `3066993` | Color for session start notifications (green #2ECC71) |
-| `CLAUDE_NOTIFY_OFFLINE_COLOR` | `15158332` | Color for session end (red #E74C3C) - PATCHes last message |
-| `CLAUDE_NOTIFY_CLEANUP_OLD` | `false` | Delete previous message when posting a new one (per project + event type) |
+| `CLAUDE_NOTIFY_PERMISSION_COLOR` | `16753920` | Color for permission prompts (orange #FFA500) |
+| `CLAUDE_NOTIFY_APPROVAL_COLOR` | `3066993` | Color for approved permissions (green #2ECC71) |
+| `CLAUDE_NOTIFY_ONLINE_COLOR` | `3066993` | Color for session online (green #2ECC71) |
+| `CLAUDE_NOTIFY_OFFLINE_COLOR` | `15158332` | Color for session offline (red #E74C3C) |
 | `CLAUDE_NOTIFY_ENABLED` | `true` | Set to `false` to disable |
 | `CLAUDE_NOTIFY_SHOW_SESSION_INFO` | `false` | Show session ID and permission mode in notifications |
 | `CLAUDE_NOTIFY_SHOW_TOOL_INFO` | `false` | Show tool name and command details (for permissions) |
@@ -84,48 +80,6 @@ docs-site=3066993
 Colors are decimal RGB integers. The project name is the basename of the working directory. Default color is Discord blurple (`5865F2` = `5793266`).
 
 Convert hex to decimal at [spycolor.com](https://www.spycolor.com).
-
-### Message cleanup
-
-By default, every notification creates a new Discord message. To keep your channel clean, enable cleanup mode:
-
-```bash
-# In ~/.claude-notify/.env
-CLAUDE_NOTIFY_CLEANUP_OLD=true
-```
-
-When enabled, posting a new notification will delete the previous message **for the same project and event type**. This means:
-- New `idle_prompt` for `my-app` replaces the old `idle_prompt` for `my-app`
-- But `permission_prompt` messages remain separate
-- Messages from different projects don't interfere with each other
-
-**Use cases:**
-- Keep channel clean when Claude Code frequently goes idle/busy
-- Avoid message spam during long sessions with many subagent updates
-- Maintain a "latest status" view per project
-
-**Note:** Message IDs are stored in `/tmp/claude-notify/` and cleared on reboot.
-
-### Cleaning up old approvals
-
-Approved permission messages (green ✅) accumulate over time. To automatically remove old approvals and keep your channel clean:
-
-```bash
-# Run manually
-bash scripts/cleanup-old-approvals.sh
-
-# Or set up a cron job (every hour)
-0 * * * * cd /path/to/claude-code-notify && bash scripts/cleanup-old-approvals.sh
-```
-
-By default, approvals older than 1 hour are deleted. Configure the TTL:
-
-```bash
-# In ~/.claude-notify/.env
-CLAUDE_NOTIFY_APPROVAL_TTL=2  # Keep approvals for 2 hours
-```
-
-This keeps your Discord channel clean while maintaining recent approval history.
 
 ### Cleaning up test messages
 
@@ -225,6 +179,21 @@ If you prefer not to use the installer:
       {
         "hooks": [{ "type": "command", "command": "/path/to/claude-notify.sh" }]
       }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [{ "type": "command", "command": "/path/to/claude-notify.sh" }]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [{ "type": "command", "command": "/path/to/claude-notify.sh" }]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [{ "type": "command", "command": "/path/to/claude-notify.sh" }]
+      }
     ]
   }
 }
@@ -265,21 +234,37 @@ This removes hooks from `settings.json` but leaves your config in `~/.claude-not
 - Ubuntu/Debian: `sudo apt install jq`
 - Other: see [jq downloads](https://jqlang.github.io/jq/download/)
 
-**Notifications are too frequent / not frequent enough**
-- Adjust cooldown timers via environment variables:
-  ```bash
-  export CLAUDE_NOTIFY_IDLE_COOLDOWN=300      # 5 minutes between idle notifications
-  export CLAUDE_NOTIFY_PERMISSION_COOLDOWN=30  # 30 seconds between permission notifications
-  ```
-- Cooldowns are per-project and reset on reboot (stored in `/tmp/claude-notify/`)
-
 **Webhook returns HTTP 429 (rate limited)**
 - Discord webhooks have a rate limit of ~30 requests per minute per webhook
-- The built-in throttling should prevent this, but if you have many projects active simultaneously, consider using separate webhooks per project
+- Since we PATCH a single message instead of posting new ones, rate limiting should be rare
+- If you have many projects active simultaneously, consider using separate webhooks per project
 
 **Subagent count seems wrong**
 - Subagent counts are tracked in `/tmp/claude-notify/` and reset on reboot
 - To manually reset: `rm /tmp/claude-notify/subagent-count-*`
+
+## How it works
+
+Claude Code's [hooks system](https://docs.anthropic.com/en/docs/claude-code) fires events as JSON on stdin. This script maintains a **single Discord message per project** that gets PATCHed through a state machine:
+
+```
+SessionStart   → POST  "🟢 Session Online"
+Agent idle     → PATCH "🦀 Ready for input"
+User input     → PATCH "🟢 Session Online"
+Permission     → PATCH "🔐 Needs Approval"
+User approves  → PATCH "✅ Permission Approved"
+Agent works    → PATCH "🟢 Session Online"
+SessionEnd     → PATCH "🔴 Session Offline"
+```
+
+Hook types used:
+- **`SessionStart`** — creates the status message (POST)
+- **`Notification`** (`idle_prompt`, `permission_prompt`) — updates status (PATCH)
+- **`PostToolUse`** — detects approvals and user activity (PATCH)
+- **`SessionEnd`** — marks offline (PATCH), cleans up state files
+- **`SubagentStart`** / **`SubagentStop`** — tracks per-project subagent counts
+
+State is stored in `/tmp/claude-notify/` (`status-msg-PROJECT`, `status-state-PROJECT`) and resets on reboot.
 
 ## FAQ
 
@@ -296,16 +281,7 @@ Only through WSL (Windows Subsystem for Linux). Native Windows is not supported.
 Not currently — all projects share the same webhook URL. You can differentiate projects visually using per-project colors in `~/.claude-notify/colors.conf`.
 
 **Will this slow down Claude Code?**
-No. Hook scripts run asynchronously and the notification script executes in under 100ms typically. The throttle check exits immediately if within the cooldown window.
-
-## How it works
-
-Claude Code's [hooks system](https://docs.anthropic.com/en/docs/claude-code) fires events as JSON on stdin. This script handles three hook types:
-
-- **`Notification`** (with `idle_prompt` or `permission_prompt` matcher) — builds and sends a Discord embed
-- **`SubagentStart`** / **`SubagentStop`** — tracks per-project subagent counts in `/tmp/claude-notify/`
-
-Throttle state is stored in `/tmp/claude-notify/` and resets on reboot.
+No. Hook scripts run asynchronously and the notification script executes in under 100ms typically. Most PostToolUse calls are instant no-ops (state check + exit).
 
 ## License
 

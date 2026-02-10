@@ -1,11 +1,11 @@
 #!/bin/bash
-# test-session-lifecycle.sh -- Tests for session message ID tracking and fallback chain
+# test-session-lifecycle.sh -- Tests for status file tracking through session lifecycle
 #
 # Verifies that:
-#   - Session message ID file is created at expected path
-#   - SessionEnd fallback chain: idle → permission → session
-#   - Session message file is always cleaned up on SessionEnd
-#   - Duplicate SessionStart deletes previous session message file
+#   - SessionStart creates status-msg and status-state files
+#   - SessionEnd clears status files
+#   - Different projects have independent status files
+#   - clear_status_files removes all tracking files
 
 set -uo pipefail
 
@@ -18,100 +18,73 @@ PROJECT="test-proj-session"
 
 # -- Tests --
 
-# 1. Session message ID file path follows expected pattern
-SESSION_FILE="$THROTTLE_DIR/msg-${PROJECT}-session"
-echo "session-msg-001" > "$SESSION_FILE"
-assert_true "Session msg file created at expected path" [ -f "$SESSION_FILE" ]
-assert_eq "Session msg ID content correct" "session-msg-001" "$(cat "$SESSION_FILE")"
-rm -f "$SESSION_FILE"
+# 1. Status message ID file path follows expected pattern
+STATUS_MSG_FILE="$THROTTLE_DIR/status-msg-${PROJECT}"
+echo "msg-001" > "$STATUS_MSG_FILE"
+assert_true "Status msg file created at expected path" [ -f "$STATUS_MSG_FILE" ]
+assert_eq "Status msg ID content correct" "msg-001" "$(cat "$STATUS_MSG_FILE")"
+rm -f "$STATUS_MSG_FILE"
 
-# 2. Fallback priority: idle message takes precedence over session
-echo "idle-msg-100" > "$THROTTLE_DIR/msg-${PROJECT}-idle_prompt"
-echo "session-msg-100" > "$THROTTLE_DIR/msg-${PROJECT}-session"
+# 2. Status state file path follows expected pattern
+STATUS_STATE_FILE="$THROTTLE_DIR/status-state-${PROJECT}"
+echo "online" > "$STATUS_STATE_FILE"
+assert_true "Status state file created at expected path" [ -f "$STATUS_STATE_FILE" ]
+assert_eq "Status state content correct" "online" "$(cat "$STATUS_STATE_FILE")"
+rm -f "$STATUS_STATE_FILE"
 
-# Simulate SessionEnd fallback logic
-MESSAGE_ID=""
-MESSAGE_ID_FILE=""
-if [ -f "$THROTTLE_DIR/msg-${PROJECT}-idle_prompt" ]; then
-    MESSAGE_ID=$(cat "$THROTTLE_DIR/msg-${PROJECT}-idle_prompt")
-    MESSAGE_ID_FILE="$THROTTLE_DIR/msg-${PROJECT}-idle_prompt"
-fi
-if [ -z "$MESSAGE_ID" ] && [ -f "$THROTTLE_DIR/msg-${PROJECT}-permission_prompt" ]; then
-    MESSAGE_ID=$(cat "$THROTTLE_DIR/msg-${PROJECT}-permission_prompt")
-    MESSAGE_ID_FILE="$THROTTLE_DIR/msg-${PROJECT}-permission_prompt"
-fi
-if [ -z "$MESSAGE_ID" ] && [ -f "$THROTTLE_DIR/msg-${PROJECT}-session" ]; then
-    MESSAGE_ID=$(cat "$THROTTLE_DIR/msg-${PROJECT}-session")
-    MESSAGE_ID_FILE="$THROTTLE_DIR/msg-${PROJECT}-session"
-fi
-assert_eq "Idle takes priority over session" "idle-msg-100" "$MESSAGE_ID"
-rm -f "$THROTTLE_DIR/msg-${PROJECT}-idle_prompt" "$THROTTLE_DIR/msg-${PROJECT}-session"
+# 3. SessionStart creates both files (simulated)
+echo "msg-100" > "$THROTTLE_DIR/status-msg-${PROJECT}"
+echo "online" > "$THROTTLE_DIR/status-state-${PROJECT}"
+assert_true "Status msg file exists after SessionStart" [ -f "$THROTTLE_DIR/status-msg-${PROJECT}" ]
+assert_true "Status state file exists after SessionStart" [ -f "$THROTTLE_DIR/status-state-${PROJECT}" ]
+assert_eq "State is online after SessionStart" "online" "$(cat "$THROTTLE_DIR/status-state-${PROJECT}")"
 
-# 3. Fallback priority: permission message takes precedence over session
-echo "perm-msg-200" > "$THROTTLE_DIR/msg-${PROJECT}-permission_prompt"
-echo "session-msg-200" > "$THROTTLE_DIR/msg-${PROJECT}-session"
+# 4. SessionEnd clears all status files (simulated clear_status_files)
+rm -f "$THROTTLE_DIR/status-msg-${PROJECT}" "$THROTTLE_DIR/status-state-${PROJECT}" "$THROTTLE_DIR/last-idle-count-${PROJECT}"
+assert_false "Status msg file cleared after SessionEnd" [ -f "$THROTTLE_DIR/status-msg-${PROJECT}" ]
+assert_false "Status state file cleared after SessionEnd" [ -f "$THROTTLE_DIR/status-state-${PROJECT}" ]
 
-MESSAGE_ID=""
-MESSAGE_ID_FILE=""
-if [ -f "$THROTTLE_DIR/msg-${PROJECT}-idle_prompt" ]; then
-    MESSAGE_ID=$(cat "$THROTTLE_DIR/msg-${PROJECT}-idle_prompt")
-    MESSAGE_ID_FILE="$THROTTLE_DIR/msg-${PROJECT}-idle_prompt"
-fi
-if [ -z "$MESSAGE_ID" ] && [ -f "$THROTTLE_DIR/msg-${PROJECT}-permission_prompt" ]; then
-    MESSAGE_ID=$(cat "$THROTTLE_DIR/msg-${PROJECT}-permission_prompt")
-    MESSAGE_ID_FILE="$THROTTLE_DIR/msg-${PROJECT}-permission_prompt"
-fi
-if [ -z "$MESSAGE_ID" ] && [ -f "$THROTTLE_DIR/msg-${PROJECT}-session" ]; then
-    MESSAGE_ID=$(cat "$THROTTLE_DIR/msg-${PROJECT}-session")
-    MESSAGE_ID_FILE="$THROTTLE_DIR/msg-${PROJECT}-session"
-fi
-assert_eq "Permission takes priority over session" "perm-msg-200" "$MESSAGE_ID"
-rm -f "$THROTTLE_DIR/msg-${PROJECT}-permission_prompt" "$THROTTLE_DIR/msg-${PROJECT}-session"
+# 5. Different projects have independent status files
+echo "proj-a-msg" > "$THROTTLE_DIR/status-msg-projA"
+echo "online" > "$THROTTLE_DIR/status-state-projA"
+echo "proj-b-msg" > "$THROTTLE_DIR/status-msg-projB"
+echo "idle" > "$THROTTLE_DIR/status-state-projB"
 
-# 4. Session fallback used when no idle or permission
-echo "session-msg-300" > "$THROTTLE_DIR/msg-${PROJECT}-session"
+assert_eq "Project A msg ID" "proj-a-msg" "$(cat "$THROTTLE_DIR/status-msg-projA")"
+assert_eq "Project B msg ID" "proj-b-msg" "$(cat "$THROTTLE_DIR/status-msg-projB")"
+assert_eq "Project A state" "online" "$(cat "$THROTTLE_DIR/status-state-projA")"
+assert_eq "Project B state" "idle" "$(cat "$THROTTLE_DIR/status-state-projB")"
 
-MESSAGE_ID=""
-MESSAGE_ID_FILE=""
-if [ -f "$THROTTLE_DIR/msg-${PROJECT}-idle_prompt" ]; then
-    MESSAGE_ID=$(cat "$THROTTLE_DIR/msg-${PROJECT}-idle_prompt")
-    MESSAGE_ID_FILE="$THROTTLE_DIR/msg-${PROJECT}-idle_prompt"
-fi
-if [ -z "$MESSAGE_ID" ] && [ -f "$THROTTLE_DIR/msg-${PROJECT}-permission_prompt" ]; then
-    MESSAGE_ID=$(cat "$THROTTLE_DIR/msg-${PROJECT}-permission_prompt")
-    MESSAGE_ID_FILE="$THROTTLE_DIR/msg-${PROJECT}-permission_prompt"
-fi
-if [ -z "$MESSAGE_ID" ] && [ -f "$THROTTLE_DIR/msg-${PROJECT}-session" ]; then
-    MESSAGE_ID=$(cat "$THROTTLE_DIR/msg-${PROJECT}-session")
-    MESSAGE_ID_FILE="$THROTTLE_DIR/msg-${PROJECT}-session"
-fi
-assert_eq "Session fallback provides message ID" "session-msg-300" "$MESSAGE_ID"
-assert_eq "Session fallback sets correct file" "$THROTTLE_DIR/msg-${PROJECT}-session" "$MESSAGE_ID_FILE"
-rm -f "$THROTTLE_DIR/msg-${PROJECT}-session"
+# Clearing project A doesn't affect project B
+rm -f "$THROTTLE_DIR/status-msg-projA" "$THROTTLE_DIR/status-state-projA"
+assert_false "Project A msg cleared" [ -f "$THROTTLE_DIR/status-msg-projA" ]
+assert_true "Project B msg untouched" [ -f "$THROTTLE_DIR/status-msg-projB" ]
+assert_eq "Project B state still idle" "idle" "$(cat "$THROTTLE_DIR/status-state-projB")"
+rm -f "$THROTTLE_DIR/status-msg-projB" "$THROTTLE_DIR/status-state-projB"
 
-# 5. Session file is always cleaned up on SessionEnd (even when idle was PATCHed)
-echo "session-msg-400" > "$THROTTLE_DIR/msg-${PROJECT}-session"
-echo "idle-msg-400" > "$THROTTLE_DIR/msg-${PROJECT}-idle_prompt"
+# 6. clear_status_files also removes idle count file
+echo "msg-200" > "$THROTTLE_DIR/status-msg-${PROJECT}"
+echo "idle_busy" > "$THROTTLE_DIR/status-state-${PROJECT}"
+echo "3" > "$THROTTLE_DIR/last-idle-count-${PROJECT}"
+rm -f "$THROTTLE_DIR/status-msg-${PROJECT}" "$THROTTLE_DIR/status-state-${PROJECT}" "$THROTTLE_DIR/last-idle-count-${PROJECT}"
+assert_false "Idle count file cleared" [ -f "$THROTTLE_DIR/last-idle-count-${PROJECT}" ]
 
-# Simulate: idle was used for PATCH, then session file cleaned unconditionally
-rm -f "$THROTTLE_DIR/msg-${PROJECT}-idle_prompt"  # simulate PATCH cleanup
-rm -f "$THROTTLE_DIR/msg-${PROJECT}-session"       # unconditional cleanup
-assert_false "Session file cleaned up after SessionEnd" [ -f "$THROTTLE_DIR/msg-${PROJECT}-session" ]
+# 7. SessionStart on fresh project (no pre-existing files)
+rm -f "$THROTTLE_DIR/status-msg-${PROJECT}" "$THROTTLE_DIR/status-state-${PROJECT}"
+echo "fresh-msg" > "$THROTTLE_DIR/status-msg-${PROJECT}"
+echo "online" > "$THROTTLE_DIR/status-state-${PROJECT}"
+assert_eq "Fresh session msg" "fresh-msg" "$(cat "$THROTTLE_DIR/status-msg-${PROJECT}")"
+assert_eq "Fresh session state" "online" "$(cat "$THROTTLE_DIR/status-state-${PROJECT}")"
+rm -f "$THROTTLE_DIR/status-msg-${PROJECT}" "$THROTTLE_DIR/status-state-${PROJECT}"
 
-# 6. Different projects have independent session files
-echo "proj-a-session" > "$THROTTLE_DIR/msg-projA-session"
-echo "proj-b-session" > "$THROTTLE_DIR/msg-projB-session"
-assert_eq "Project A session ID" "proj-a-session" "$(cat "$THROTTLE_DIR/msg-projA-session")"
-assert_eq "Project B session ID" "proj-b-session" "$(cat "$THROTTLE_DIR/msg-projB-session")"
-rm -f "$THROTTLE_DIR/msg-projA-session" "$THROTTLE_DIR/msg-projB-session"
-
-# 7. SessionStart overwrites previous session file (simulated)
-echo "old-session" > "$THROTTLE_DIR/msg-${PROJECT}-session"
-# Simulate: delete old, then write new
-rm -f "$THROTTLE_DIR/msg-${PROJECT}-session"
-echo "new-session" > "$THROTTLE_DIR/msg-${PROJECT}-session"
-assert_eq "New SessionStart replaces old session file" "new-session" "$(cat "$THROTTLE_DIR/msg-${PROJECT}-session")"
-rm -f "$THROTTLE_DIR/msg-${PROJECT}-session"
+# 8. Overwriting status files replaces content
+echo "old-msg" > "$THROTTLE_DIR/status-msg-${PROJECT}"
+echo "new-msg" > "$THROTTLE_DIR/status-msg-${PROJECT}"
+assert_eq "Status msg overwrite works" "new-msg" "$(cat "$THROTTLE_DIR/status-msg-${PROJECT}")"
+echo "online" > "$THROTTLE_DIR/status-state-${PROJECT}"
+echo "idle" > "$THROTTLE_DIR/status-state-${PROJECT}"
+assert_eq "Status state overwrite works" "idle" "$(cat "$THROTTLE_DIR/status-state-${PROJECT}")"
+rm -f "$THROTTLE_DIR/status-msg-${PROJECT}" "$THROTTLE_DIR/status-state-${PROJECT}"
 
 # -- Cleanup and summary --
 

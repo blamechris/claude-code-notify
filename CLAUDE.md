@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**claude-code-notify** is a lightweight Discord notification system for Claude Code sessions. It hooks into Claude Code's event system to send color-coded embeds when agents go idle, need permission approval, or have subagents running. Features approval tracking with automatic status updates (orange → green when approved).
+**claude-code-notify** is a lightweight Discord notification system for Claude Code sessions. It maintains a single status message per project, PATCHed in-place through the full session lifecycle (online → idle → permission → approved → offline).
 
 - **Tech:** Bash scripts, jq, curl, Discord webhook API
 - **License:** MIT
@@ -43,26 +43,30 @@ claude-code-notify/
 ├── .claude/commands/      # Claude Code skills (check-pr, agent-review)
 ├── scripts/               # Utility scripts
 │   ├── discord-bulk-delete.sh     # Bulk delete messages in a channel (requires bot token)
-│   ├── cleanup-old-approvals.sh   # Time-based cleanup for old approved permissions
 │   └── cleanup-test-messages.sh   # Clean up test-proj-* messages (auto-run by test suite)
-└── tests/                 # Pure bash test suite (11 automated tests, no framework)
+└── tests/                 # Pure bash test suite (no framework)
     ├── run-tests.sh       # Test runner entry point
     ├── setup.sh           # Shared test environment setup
     ├── test-throttle.sh   # Throttle logic tests
     ├── test-colors.sh     # Color lookup tests
-    ├── test-payload.sh    # Discord payload structure tests
-    ├── test-subagent-count.sh  # Subagent tracking tests
-    └── test-notification-cleanup*.sh  # Message cleanup feature tests
+    ├── test-payload.sh    # Status payload structure tests (all 6 states)
+    ├── test-session-lifecycle.sh   # Status file lifecycle tests
+    ├── test-state-transitions.sh   # State machine transition tests
+    ├── test-cleanup.sh    # Status file isolation tests
+    └── test-subagent-count.sh  # Subagent tracking tests
 ```
 
 ## Architecture
 
-- **Hook pattern:** stdin JSON -> jq parse -> curl Discord webhook
+- **Hook pattern:** stdin JSON → jq parse → curl Discord webhook (POST or PATCH)
+- **Single message per project:** One Discord message PATCHed through the lifecycle
+- **State machine:** `online` → `idle`/`idle_busy` → `permission` → `approved` → `offline`
+- **State files:** `status-msg-PROJECT` (Discord message ID), `status-state-PROJECT` (current state)
 - **Config hierarchy:** env var > `~/.claude-notify/.env` > hardcoded defaults
-- **State:** `/tmp/claude-notify/` (ephemeral: throttle files, subagent counts, message IDs)
+- **State:** `/tmp/claude-notify/` (ephemeral: status files, throttle files, subagent counts)
 - **Config:** `~/.claude-notify/` (persistent: webhook URL, colors, enabled state)
-- **Hooks registered:** Notification (idle/permission), SubagentStart/Stop, PostToolUse (approval detection)
-- **Approval flow:** Permission prompt (orange) → User approves → PostToolUse fires → PATCH to green
+- **Hooks registered:** SessionStart/End, Notification (idle/permission), PostToolUse, SubagentStart/Stop
+- **Self-healing:** PATCH 404 → falls back to POST (handles externally deleted messages)
 
 ## Key Conventions
 
@@ -89,9 +93,6 @@ bash scripts/cleanup-test-messages.sh
 
 # Bulk delete ALL messages from Discord channel (requires bot token)
 DISCORD_BOT_TOKEN=<token> bash scripts/discord-bulk-delete.sh <channel_id>
-
-# Clean up old approved permissions (time-based, default 1 hour TTL)
-bash scripts/cleanup-old-approvals.sh
 ```
 
 No build step, no dependencies beyond `jq` and `curl`.

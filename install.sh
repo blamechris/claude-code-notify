@@ -48,6 +48,18 @@ if [ "${1:-}" = "--uninstall" ]; then
                     .SubagentStop |= map(select(.hooks | all(.command != $script)))
                     | if .SubagentStop == [] then del(.SubagentStop) else . end
                 else . end
+                | if .SessionStart then
+                    .SessionStart |= map(select(.hooks | all(.command != $script)))
+                    | if .SessionStart == [] then del(.SessionStart) else . end
+                else . end
+                | if .SessionEnd then
+                    .SessionEnd |= map(select(.hooks | all(.command != $script)))
+                    | if .SessionEnd == [] then del(.SessionEnd) else . end
+                else . end
+                | if .PostToolUse then
+                    .PostToolUse |= map(select(.hooks | all(.command != $script)))
+                    | if .PostToolUse == [] then del(.PostToolUse) else . end
+                else . end
             )
         ' "$SETTINGS_FILE" > "$TEMP" && mv "$TEMP" "$SETTINGS_FILE"
         info "Hooks removed. Config in $NOTIFY_DIR left intact."
@@ -143,12 +155,18 @@ else
         | .hooks.Notification //= []
         | .hooks.SubagentStart //= []
         | .hooks.SubagentStop //= []
+        | .hooks.SessionStart //= []
+        | .hooks.SessionEnd //= []
+        | .hooks.PostToolUse //= []
         | .hooks.Notification += [
             { "matcher": "idle_prompt", "hooks": [$hook] },
             { "matcher": "permission_prompt", "hooks": [$hook] }
         ]
         | .hooks.SubagentStart += [{ "hooks": [$hook] }]
         | .hooks.SubagentStop += [{ "hooks": [$hook] }]
+        | .hooks.SessionStart += [{ "hooks": [$hook] }]
+        | .hooks.SessionEnd += [{ "hooks": [$hook] }]
+        | .hooks.PostToolUse += [{ "hooks": [$hook] }]
     ' "$SETTINGS_FILE" > "$TEMP" && mv "$TEMP" "$SETTINGS_FILE"
 
     info "Hooks added to settings.json"
