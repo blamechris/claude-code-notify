@@ -50,7 +50,6 @@ get_subagent_count() {
 # -- Tests --
 
 # 1. SubagentStart increments counter from 0 to 1
-rm -f "$THROTTLE_DIR/subagent-count-testproj1"
 simulate_subagent_start "testproj1"
 assert_eq "SubagentStart increments 0 -> 1" "1" "$(get_subagent_count testproj1)"
 
@@ -79,7 +78,6 @@ simulate_subagent_stop "testproj1"
 assert_eq "Counter does not go below 0 (second extra stop)" "0" "$(get_subagent_count testproj1)"
 
 # 5. Different projects have independent counters
-rm -f "$THROTTLE_DIR/subagent-count-projA" "$THROTTLE_DIR/subagent-count-projB"
 simulate_subagent_start "projA"
 simulate_subagent_start "projA"
 simulate_subagent_start "projB"
@@ -92,7 +90,6 @@ assert_eq "Project A decremented to 1, B unchanged" "1" "$(get_subagent_count pr
 assert_eq "Project B still 1 after A's stop" "1" "$(get_subagent_count projB)"
 
 # 6. Starting from a missing count file
-rm -f "$THROTTLE_DIR/subagent-count-freshproj"
 assert_eq "Missing count file reads as 0" "0" "$(get_subagent_count freshproj)"
 
 # -- Cleanup and summary --

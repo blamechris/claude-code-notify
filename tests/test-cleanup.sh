@@ -56,9 +56,6 @@ FINAL_ID=$(cat "$THROTTLE_DIR/msg-replace-test-idle_prompt")
 assert_eq "New message ID replaces old one" "new-message-id" "$FINAL_ID"
 
 # 5. Reading non-existent message ID file returns empty
-if [ -f "$THROTTLE_DIR/msg-nonexistent-idle_prompt" ]; then
-    rm "$THROTTLE_DIR/msg-nonexistent-idle_prompt"
-fi
 
 EMPTY_ID=$(cat "$THROTTLE_DIR/msg-nonexistent-idle_prompt" 2>/dev/null || true)
 assert_eq "Non-existent file returns empty" "" "$EMPTY_ID"
