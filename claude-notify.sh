@@ -92,6 +92,83 @@ if [ "$HOOK_EVENT" = "SubagentStop" ]; then
     exit 0
 fi
 
+# -- Approval detection (PostToolUse) --
+# When a tool executes successfully after a permission prompt, update the Discord message to green
+
+if [ "$HOOK_EVENT" = "PostToolUse" ]; then
+    # Check if webhook is configured
+    [ -z "${CLAUDE_NOTIFY_WEBHOOK:-}" ] && exit 0
+
+    # Check if there's a recent permission message (within 5 minutes = 300 seconds)
+    PERMISSION_MSG_FILE="$THROTTLE_DIR/msg-${PROJECT_NAME}-permission_prompt"
+    PERMISSION_TIME_FILE="$THROTTLE_DIR/last-permission-${PROJECT_NAME}"
+
+    if [ -f "$PERMISSION_MSG_FILE" ] && [ -f "$PERMISSION_TIME_FILE" ]; then
+        LAST_PERMISSION=$(cat "$PERMISSION_TIME_FILE" 2>/dev/null || echo 0)
+        NOW=$(date +%s)
+        AGE=$((NOW - LAST_PERMISSION))
+
+        # Within 5-minute window - this approval relates to that permission
+        if [ "$AGE" -lt 300 ]; then
+            MESSAGE_ID=$(cat "$PERMISSION_MSG_FILE" 2>/dev/null)
+
+            if [ -n "$MESSAGE_ID" ]; then
+                # Extract webhook ID and token for PATCH endpoint
+                WEBHOOK_ID_TOKEN=$(echo "$CLAUDE_NOTIFY_WEBHOOK" | sed -n 's|.*/webhooks/\([0-9]*/[^/?]*\).*|\1|p')
+
+                if [ -n "$WEBHOOK_ID_TOKEN" ]; then
+                    # Build approval payload (green color)
+                    APPROVAL_COLOR="${CLAUDE_NOTIFY_APPROVAL_COLOR:-3066993}"  # Green #2ECC71
+                    TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+                    BOT_NAME="${CLAUDE_NOTIFY_BOT_NAME:-Claude Code}"
+
+                    PAYLOAD=$(jq -c -n \
+                        --arg username "$BOT_NAME" \
+                        --arg title "✅ ${PROJECT_NAME} — Permission Approved" \
+                        --argjson color "$APPROVAL_COLOR" \
+                        --arg ts "$TIMESTAMP" \
+                        '{
+                            username: $username,
+                            embeds: [{
+                                title: $title,
+                                color: $color,
+                                fields: [{
+                                    name: "Status",
+                                    value: "Permission granted, tool executed successfully",
+                                    inline: false
+                                }],
+                                footer: { text: "Claude Code" },
+                                timestamp: $ts
+                            }]
+                        }')
+
+                    # PATCH with retry (3 attempts, exponential backoff)
+                    for attempt in 1 2 3; do
+                        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+                            -X PATCH \
+                            -H "Content-Type: application/json" \
+                            -d "$PAYLOAD" \
+                            "https://discord.com/api/webhooks/${WEBHOOK_ID_TOKEN}/messages/${MESSAGE_ID}")
+
+                        if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "204" ]; then
+                            # Success - clean up the message ID file so we don't re-update
+                            rm -f "$PERMISSION_MSG_FILE"
+                            exit 0
+                        fi
+
+                        # Rate limited or server error - retry with backoff
+                        if [ "$attempt" -lt 3 ]; then
+                            sleep $(( attempt * attempt ))  # 1s, 4s
+                        fi
+                    done
+                fi
+            fi
+        fi
+    fi
+
+    exit 0
+fi
+
 # -- Validate webhook URL (only needed for notification events) --
 
 if [ -z "${CLAUDE_NOTIFY_WEBHOOK:-}" ]; then
