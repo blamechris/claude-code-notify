@@ -250,6 +250,27 @@ get_project_color() {
     esac
 }
 
+# -- Extract and validate webhook ID/token --
+# Handles variations in Discord webhook URLs (query params, trailing slashes, fragments)
+extract_webhook_id_token() {
+    local webhook_url="$1"
+
+    # Extract ID/TOKEN from URL, removing query params and fragments
+    local id_token=$(echo "$webhook_url" | jq -R 'split("/webhooks/")[1] | split("?")[0] | split("#")[0] | gsub("/$"; "")' 2>/dev/null || true)
+
+    # Remove jq's JSON quotes if present
+    id_token="${id_token%\"}"
+    id_token="${id_token#\"}"
+
+    # Validate format: ID (numeric) / TOKEN (alphanumeric, dashes, underscores)
+    if [[ "$id_token" =~ ^[0-9]+/[A-Za-z0-9_-]+$ ]]; then
+        echo "$id_token"
+        return 0
+    else
+        return 1
+    fi
+}
+
 # -- Status emoji --
 get_status_emoji() {
     case "$1" in
