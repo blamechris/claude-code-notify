@@ -42,7 +42,7 @@ load_env_var() {
     eval "[ -z \"\${${var_name}:-}\" ]" || return 0
     local val
     val=$(grep -m1 "^${var_name}=" "$NOTIFY_DIR/.env" 2>/dev/null | cut -d= -f2- || true)
-    [ -n "$val" ] && eval "${var_name}=\$val"
+    [ -n "$val" ] && eval "${var_name}=\$val" || true
 }
 
 # Load config from .env file (env vars take precedence)
@@ -535,7 +535,15 @@ if [ "$HOOK_EVENT" = "PostToolUse" ]; then
     CURRENT_STATE=$(read_status_state)
     case "$CURRENT_STATE" in
         permission)     patch_status_message "approved" ;;
-        idle|idle_busy) patch_status_message "online" ;;
+        idle|idle_busy)
+            # Only transition to online if no subagents are running.
+            # PostToolUse fires for subagent tool use too — don't let
+            # subagent activity revert idle/idle_busy back to online.
+            SUBS=0
+            [ -f "$SUBAGENT_COUNT_FILE" ] && SUBS=$(cat "$SUBAGENT_COUNT_FILE" 2>/dev/null || echo 0)
+            [ "$SUBS" -gt 0 ] && exit 0
+            patch_status_message "online"
+            ;;
         approved)       patch_status_message "online" ;;
         *)              exit 0 ;;  # online/offline/empty = no-op
     esac
