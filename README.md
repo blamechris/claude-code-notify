@@ -98,6 +98,27 @@ When enabled, posting a new notification will delete the previous message **for 
 
 **Note:** Message IDs are stored in `/tmp/claude-notify/` and cleared on reboot.
 
+### Cleaning up old approvals
+
+Approved permission messages (green ✅) accumulate over time. To automatically remove old approvals and keep your channel clean:
+
+```bash
+# Run manually
+bash scripts/cleanup-old-approvals.sh
+
+# Or set up a cron job (every hour)
+0 * * * * cd /path/to/claude-code-notify && bash scripts/cleanup-old-approvals.sh
+```
+
+By default, approvals older than 1 hour are deleted. Configure the TTL:
+
+```bash
+# In ~/.claude-notify/.env
+CLAUDE_NOTIFY_APPROVAL_TTL=2  # Keep approvals for 2 hours
+```
+
+This keeps your Discord channel clean while maintaining recent approval history.
+
 Common colors:
 | Color | Hex | Decimal |
 |-------|-----|---------|
