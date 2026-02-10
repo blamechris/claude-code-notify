@@ -112,7 +112,13 @@ printf "=== claude-code-notify test suite ===\n\n"
 echo "DEBUG: About to iterate test files..." >&2
 for test_file in "$TESTS_DIR"/test-*.sh; do
     echo "DEBUG: Found file: $test_file" >&2
-    [ -f "$test_file" ] || { echo "DEBUG: Not a file, skipping" >&2; continue; }
+
+    # Skip if not a file
+    if [ ! -f "$test_file" ]; then
+        echo "DEBUG: Not a file, skipping" >&2
+        continue
+    fi
+
     test_name=$(basename "$test_file" .sh)
     ((total_files++))
     echo "DEBUG: Running test $total_files: $test_name" >&2
