@@ -16,4 +16,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y jq curl
       - name: Run tests
+        env:
+          CI: true
         run: bash tests/run-tests.sh
