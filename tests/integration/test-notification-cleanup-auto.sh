@@ -1,12 +1,33 @@
 #!/bin/bash
 # test-notification-cleanup-auto.sh
 # Non-interactive version for automated testing
+# NOTE: This is an integration test that posts REAL messages to Discord
+# It is skipped in CI environments (no webhook credentials)
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 HOOK_SCRIPT="$PROJECT_ROOT/claude-notify.sh"
+
+# Skip in CI environments (integration test posts real Discord messages)
+if [ "${CI:-false}" = "true" ]; then
+    echo "Skipping integration test in CI (requires Discord webhook)"
+    echo ""
+    echo "  Results: 0 passed, 0 failed (out of 0)"
+    exit 0
+fi
+
+# Skip if no webhook configured (local runs need credentials)
+if [ -z "${CLAUDE_NOTIFY_WEBHOOK:-}" ]; then
+    if [ ! -f "$HOME/.claude-notify/.env" ] || ! grep -q "^CLAUDE_NOTIFY_WEBHOOK=" "$HOME/.claude-notify/.env" 2>/dev/null; then
+        echo "Skipping integration test (no Discord webhook configured)"
+        echo "Set CLAUDE_NOTIFY_WEBHOOK in ~/.claude-notify/.env to run this test"
+        echo ""
+        echo "  Results: 0 passed, 0 failed (out of 0)"
+        exit 0
+    fi
+fi
 
 # Test configuration
 export CLAUDE_NOTIFY_CLEANUP_OLD=true

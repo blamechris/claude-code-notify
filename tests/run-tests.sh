@@ -42,10 +42,10 @@ assert_eq() {
     local desc="$1" expected="$2" actual="$3"
     if [ "$expected" = "$actual" ]; then
         printf "  PASS: %s\n" "$desc"
-        ((pass++))
+        pass=$((pass + 1))
     else
         printf "  FAIL: %s (expected '%s', got '%s')\n" "$desc" "$expected" "$actual"
-        ((fail++))
+        fail=$((fail + 1))
     fi
 }
 
@@ -53,10 +53,10 @@ assert_match() {
     local desc="$1" pattern="$2" actual="$3"
     if echo "$actual" | grep -qE "$pattern"; then
         printf "  PASS: %s\n" "$desc"
-        ((pass++))
+        pass=$((pass + 1))
     else
         printf "  FAIL: %s (pattern '%s' not found in '%s')\n" "$desc" "$pattern" "$actual"
-        ((fail++))
+        fail=$((fail + 1))
     fi
 }
 
@@ -65,10 +65,10 @@ assert_true() {
     shift
     if "$@"; then
         printf "  PASS: %s\n" "$desc"
-        ((pass++))
+        pass=$((pass + 1))
     else
         printf "  FAIL: %s (command returned non-zero)\n" "$desc"
-        ((fail++))
+        fail=$((fail + 1))
     fi
 }
 
@@ -77,10 +77,10 @@ assert_false() {
     shift
     if "$@"; then
         printf "  FAIL: %s (command returned zero, expected non-zero)\n" "$desc"
-        ((fail++))
+        fail=$((fail + 1))
     else
         printf "  PASS: %s\n" "$desc"
-        ((pass++))
+        pass=$((pass + 1))
     fi
 }
 
@@ -105,7 +105,7 @@ printf "=== claude-code-notify test suite ===\n\n"
 for test_file in "$TESTS_DIR"/test-*.sh; do
     [ -f "$test_file" ] || continue
     test_name=$(basename "$test_file" .sh)
-    ((total_files++))
+    total_files=$((total_files + 1))
 
     printf "[%s]\n" "$test_name"
 
