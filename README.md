@@ -12,7 +12,10 @@ Sends color-coded Discord embeds when Claude Code:
 
 - **Goes idle** — waiting for your input (green indicator)
 - **Has subagents running** — main loop idle but background agents active (blue indicator)
-- **Needs permission** — waiting for approval to run a tool (lock indicator)
+- **Needs permission** — waiting for approval to run a tool (orange indicator)
+- **Permission approved** — tool executed successfully after approval (green indicator with ✅)
+
+Permission messages automatically update from orange to green when you approve them, creating an audit trail of all permission decisions.
 
 Each project gets its own embed color, and notifications are throttled to avoid spam (idle: 60s, permission: 60s cooldowns, per-project).
 
@@ -55,6 +58,8 @@ All config lives in `~/.claude-notify/` (override with `CLAUDE_NOTIFY_DIR` env v
 | `CLAUDE_NOTIFY_BOT_NAME` | `Claude Code` | Webhook bot display name |
 | `CLAUDE_NOTIFY_IDLE_COOLDOWN` | `60` | Seconds between idle notifications (per project) |
 | `CLAUDE_NOTIFY_PERMISSION_COOLDOWN` | `60` | Seconds between permission notifications (per project) |
+| `CLAUDE_NOTIFY_PERMISSION_COLOR` | `16753920` | Color for permission prompts (orange #FFA500) - overrides project colors |
+| `CLAUDE_NOTIFY_APPROVAL_COLOR` | `3066993` | Color for approved permissions (green #2ECC71) - auto-updates messages |
 | `CLAUDE_NOTIFY_CLEANUP_OLD` | `false` | Delete previous message when posting a new one (per project + event type) |
 | `CLAUDE_NOTIFY_ENABLED` | `true` | Set to `false` to disable |
 

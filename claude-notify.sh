@@ -92,6 +92,83 @@ if [ "$HOOK_EVENT" = "SubagentStop" ]; then
     exit 0
 fi
 
+# -- Approval detection (PostToolUse) --
+# When a tool executes successfully after a permission prompt, update the Discord message to green
+
+if [ "$HOOK_EVENT" = "PostToolUse" ]; then
+    # Check if webhook is configured
+    [ -z "${CLAUDE_NOTIFY_WEBHOOK:-}" ] && exit 0
+
+    # Check if there's a recent permission message (within 5 minutes = 300 seconds)
+    PERMISSION_MSG_FILE="$THROTTLE_DIR/msg-${PROJECT_NAME}-permission_prompt"
+    PERMISSION_TIME_FILE="$THROTTLE_DIR/last-permission-${PROJECT_NAME}"
+
+    if [ -f "$PERMISSION_MSG_FILE" ] && [ -f "$PERMISSION_TIME_FILE" ]; then
+        LAST_PERMISSION=$(cat "$PERMISSION_TIME_FILE" 2>/dev/null || echo 0)
+        NOW=$(date +%s)
+        AGE=$((NOW - LAST_PERMISSION))
+
+        # Within 5-minute window - this approval relates to that permission
+        if [ "$AGE" -lt 300 ]; then
+            MESSAGE_ID=$(cat "$PERMISSION_MSG_FILE" 2>/dev/null)
+
+            if [ -n "$MESSAGE_ID" ]; then
+                # Extract webhook ID and token for PATCH endpoint
+                WEBHOOK_ID_TOKEN=$(echo "$CLAUDE_NOTIFY_WEBHOOK" | sed -n 's|.*/webhooks/\([0-9]*/[^/?]*\).*|\1|p')
+
+                if [ -n "$WEBHOOK_ID_TOKEN" ]; then
+                    # Build approval payload (green color)
+                    APPROVAL_COLOR="${CLAUDE_NOTIFY_APPROVAL_COLOR:-3066993}"  # Green #2ECC71
+                    TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+                    BOT_NAME="${CLAUDE_NOTIFY_BOT_NAME:-Claude Code}"
+
+                    PAYLOAD=$(jq -c -n \
+                        --arg username "$BOT_NAME" \
+                        --arg title "✅ ${PROJECT_NAME} — Permission Approved" \
+                        --argjson color "$APPROVAL_COLOR" \
+                        --arg ts "$TIMESTAMP" \
+                        '{
+                            username: $username,
+                            embeds: [{
+                                title: $title,
+                                color: $color,
+                                fields: [{
+                                    name: "Status",
+                                    value: "Permission granted, tool executed successfully",
+                                    inline: false
+                                }],
+                                footer: { text: "Claude Code" },
+                                timestamp: $ts
+                            }]
+                        }')
+
+                    # PATCH with retry (3 attempts, exponential backoff)
+                    for attempt in 1 2 3; do
+                        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+                            -X PATCH \
+                            -H "Content-Type: application/json" \
+                            -d "$PAYLOAD" \
+                            "https://discord.com/api/webhooks/${WEBHOOK_ID_TOKEN}/messages/${MESSAGE_ID}")
+
+                        if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "204" ]; then
+                            # Success - clean up the message ID file so we don't re-update
+                            rm -f "$PERMISSION_MSG_FILE"
+                            exit 0
+                        fi
+
+                        # Rate limited or server error - retry with backoff
+                        if [ "$attempt" -lt 3 ]; then
+                            sleep $(( attempt * attempt ))  # 1s, 4s
+                        fi
+                    done
+                fi
+            fi
+        fi
+    fi
+
+    exit 0
+fi
+
 # -- Validate webhook URL (only needed for notification events) --
 
 if [ -z "${CLAUDE_NOTIFY_WEBHOOK:-}" ]; then
@@ -112,10 +189,24 @@ MESSAGE=$(echo "$INPUT" | jq -r '.message // empty' 2>/dev/null)
 # Customize these for your projects. Color values are decimal integers.
 # Use https://www.spycolor.com to convert hex → decimal.
 get_project_color() {
+    local project="$1"
+    local event_type="${2:-}"
+
+    # Event-type color overrides (takes precedence over project colors)
+    if [ -n "$event_type" ]; then
+        case "$event_type" in
+            permission_prompt)
+                # Orange for permission prompts (urgent, needs attention)
+                echo "${CLAUDE_NOTIFY_PERMISSION_COLOR:-16753920}"
+                return
+                ;;
+        esac
+    fi
+
     # Check for user overrides in config file
     if [ -f "$NOTIFY_DIR/colors.conf" ]; then
         local color
-        color=$(grep -m1 "^${1}=" "$NOTIFY_DIR/colors.conf" 2>/dev/null | cut -d= -f2- || true)
+        color=$(grep -m1 "^${project}=" "$NOTIFY_DIR/colors.conf" 2>/dev/null | cut -d= -f2- || true)
         if [ -n "$color" ] && [[ "$color" =~ ^[0-9]+$ ]]; then
             echo "$color"
             return
@@ -123,7 +214,7 @@ get_project_color() {
     fi
 
     # Built-in defaults
-    case "$1" in
+    case "$project" in
         *)  echo 5793266 ;;  # Default blue #5865F2 (Discord blurple)
     esac
 }
@@ -154,7 +245,7 @@ throttle_check() {
 # -- Build notification --
 
 TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-COLOR=$(get_project_color "$PROJECT_NAME")
+COLOR=$(get_project_color "$PROJECT_NAME" "$NOTIFICATION_TYPE")
 BOT_NAME="${CLAUDE_NOTIFY_BOT_NAME:-Claude Code}"
 
 case "$NOTIFICATION_TYPE" in
@@ -232,8 +323,8 @@ PAYLOAD=$(jq -c -n \
         }]
     }')
 
-# Delete old message if cleanup is enabled
-if [ "${CLAUDE_NOTIFY_CLEANUP_OLD:-false}" = "true" ]; then
+# Delete old message if cleanup is enabled (but NOT for permission messages - keep audit history)
+if [ "${CLAUDE_NOTIFY_CLEANUP_OLD:-false}" = "true" ] && [ "$NOTIFICATION_TYPE" != "permission_prompt" ]; then
     MESSAGE_ID_FILE="$THROTTLE_DIR/msg-${PROJECT_NAME}-${NOTIFICATION_TYPE}"
     if [ -f "$MESSAGE_ID_FILE" ]; then
         OLD_MESSAGE_ID=$(cat "$MESSAGE_ID_FILE" 2>/dev/null || true)
