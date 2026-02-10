@@ -40,11 +40,8 @@ if [ -f "$NOTIFY_DIR/.env" ]; then
         CLAUDE_NOTIFY_CLEANUP_OLD=$(grep -m1 '^CLAUDE_NOTIFY_CLEANUP_OLD=' "$NOTIFY_DIR/.env" 2>/dev/null | cut -d= -f2- || true)
 fi
 
-# Check enabled state
-if [ "${CLAUDE_NOTIFY_ENABLED:-}" = "false" ]; then
-    exit 0
-fi
-if [ -f "$NOTIFY_DIR/.disabled" ]; then
+# Check enabled state (file-based .disabled takes precedence over env var)
+if [ -f "$NOTIFY_DIR/.disabled" ] || [ "${CLAUDE_NOTIFY_ENABLED:-}" = "false" ]; then
     exit 0
 fi
 
