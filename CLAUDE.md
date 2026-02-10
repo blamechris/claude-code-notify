@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**claude-code-notify** is a lightweight Discord notification system for Claude Code sessions. It hooks into Claude Code's event system to send color-coded embeds when agents go idle, need permission approval, or have subagents running.
+**claude-code-notify** is a lightweight Discord notification system for Claude Code sessions. It hooks into Claude Code's event system to send color-coded embeds when agents go idle, need permission approval, or have subagents running. Features approval tracking with automatic status updates (orange → green when approved).
 
 - **Tech:** Bash scripts, jq, curl, Discord webhook API
 - **License:** MIT
@@ -35,8 +35,9 @@ claude-code-notify/
 ├── .env.example           # Example webhook URL config
 ├── .claude/commands/      # Claude Code skills (check-pr, agent-review)
 ├── scripts/               # Utility scripts
-│   └── discord-bulk-delete.sh  # Bulk delete messages in a channel (requires bot token)
-└── tests/                 # Pure bash test suite (53 tests, no framework)
+│   ├── discord-bulk-delete.sh     # Bulk delete messages in a channel (requires bot token)
+│   └── cleanup-old-approvals.sh   # Time-based cleanup for old approved permissions
+└── tests/                 # Pure bash test suite (11 automated tests, no framework)
     ├── run-tests.sh       # Test runner entry point
     ├── setup.sh           # Shared test environment setup
     ├── test-throttle.sh   # Throttle logic tests
@@ -50,8 +51,10 @@ claude-code-notify/
 
 - **Hook pattern:** stdin JSON -> jq parse -> curl Discord webhook
 - **Config hierarchy:** env var > `~/.claude-notify/.env` > hardcoded defaults
-- **State:** `/tmp/claude-notify/` (ephemeral: throttle files, subagent counts)
+- **State:** `/tmp/claude-notify/` (ephemeral: throttle files, subagent counts, message IDs)
 - **Config:** `~/.claude-notify/` (persistent: webhook URL, colors, enabled state)
+- **Hooks registered:** Notification (idle/permission), SubagentStart/Stop, PostToolUse (approval detection)
+- **Approval flow:** Permission prompt (orange) → User approves → PostToolUse fires → PATCH to green
 
 ## Key Conventions
 
@@ -75,6 +78,9 @@ bash tests/test-throttle.sh
 
 # Bulk delete messages from Discord channel (requires bot token)
 DISCORD_BOT_TOKEN=<token> bash scripts/discord-bulk-delete.sh <channel_id>
+
+# Clean up old approved permissions (time-based, default 1 hour TTL)
+bash scripts/cleanup-old-approvals.sh
 ```
 
 No build step, no dependencies beyond `jq` and `curl`.

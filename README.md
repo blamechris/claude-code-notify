@@ -60,8 +60,11 @@ All config lives in `~/.claude-notify/` (override with `CLAUDE_NOTIFY_DIR` env v
 | `CLAUDE_NOTIFY_PERMISSION_COOLDOWN` | `60` | Seconds between permission notifications (per project) |
 | `CLAUDE_NOTIFY_PERMISSION_COLOR` | `16753920` | Color for permission prompts (orange #FFA500) - overrides project colors |
 | `CLAUDE_NOTIFY_APPROVAL_COLOR` | `3066993` | Color for approved permissions (green #2ECC71) - auto-updates messages |
+| `CLAUDE_NOTIFY_APPROVAL_TTL` | `1` | Hours to keep approved permissions before cleanup (time-based cleanup script) |
 | `CLAUDE_NOTIFY_CLEANUP_OLD` | `false` | Delete previous message when posting a new one (per project + event type) |
 | `CLAUDE_NOTIFY_ENABLED` | `true` | Set to `false` to disable |
+| `DISCORD_BOT_TOKEN` | *(optional)* | Bot token for bulk operations (channel cleanup, not needed for hooks) |
+| `DISCORD_DELETE_DELAY` | `0.5` | Seconds between deletions in bulk delete script (rate limiting) |
 
 ### Project colors
 
