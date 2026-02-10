@@ -17,6 +17,12 @@ if [ -z "$CHANNEL_ID" ]; then
     exit 1
 fi
 
+# Validate channel ID is numeric (Discord IDs are 17-19 digit snowflakes)
+if ! [[ "$CHANNEL_ID" =~ ^[0-9]{17,19}$ ]]; then
+    echo "Error: Invalid channel ID '$CHANNEL_ID' (must be 17-19 digits)" >&2
+    exit 1
+fi
+
 echo "========================================"
 echo "Discord Bulk Delete"
 echo "========================================"
@@ -28,7 +34,12 @@ echo "Fetching messages..."
 MESSAGES=$(curl -s -H "Authorization: Bot $BOT_TOKEN" \
     "https://discord.com/api/v10/channels/$CHANNEL_ID/messages?limit=100")
 
-MESSAGE_IDS=$(echo "$MESSAGES" | jq -r '.[].id' 2>/dev/null || true)
+# Parse message IDs (jq errors indicate API failure, not empty results)
+if ! MESSAGE_IDS=$(echo "$MESSAGES" | jq -r '.[].id' 2>&1); then
+    echo "Error: Failed to parse Discord API response. Check token and channel ID." >&2
+    echo "Response: $MESSAGES" >&2
+    exit 1
+fi
 
 if [ -z "$MESSAGE_IDS" ]; then
     echo "No messages found or error fetching messages."
