@@ -1,11 +1,16 @@
 #!/bin/bash
 # discord-bulk-delete.sh
 # Bulk delete messages in a Discord channel using bot token
+#
+# Environment variables:
+#   DISCORD_BOT_TOKEN - Bot token from Discord Developer Portal (required)
+#   DISCORD_DELETE_DELAY - Seconds to wait between deletions (default: 0.5)
 
 set -euo pipefail
 
 BOT_TOKEN="${DISCORD_BOT_TOKEN:-}"
 CHANNEL_ID="${1:-}"
+DELETE_DELAY="${DISCORD_DELETE_DELAY:-0.5}"
 
 if [ -z "$BOT_TOKEN" ]; then
     echo "Error: DISCORD_BOT_TOKEN environment variable not set" >&2
@@ -72,7 +77,7 @@ while IFS= read -r msg_id; do
     fi
 
     # Rate limit: Discord allows ~5 deletes per second, be more conservative
-    sleep 0.5
+    sleep "$DELETE_DELAY"
 done <<< "$MESSAGE_IDS"
 
 echo ""
