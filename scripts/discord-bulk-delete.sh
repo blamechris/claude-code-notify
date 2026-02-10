@@ -42,7 +42,13 @@ MESSAGES=$(curl -s -H "Authorization: Bot $BOT_TOKEN" \
 # Parse message IDs (jq errors indicate API failure, not empty results)
 if ! MESSAGE_IDS=$(echo "$MESSAGES" | jq -r '.[].id' 2>&1); then
     echo "Error: Failed to parse Discord API response. Check token and channel ID." >&2
-    echo "Response: $MESSAGES" >&2
+    # Truncate response to avoid flooding stderr with large JSON
+    TRUNCATED_RESPONSE=$(echo "$MESSAGES" | head -c 200)
+    if [ "${#MESSAGES}" -gt 200 ]; then
+        echo "Response: ${TRUNCATED_RESPONSE}... (truncated)" >&2
+    else
+        echo "Response: $MESSAGES" >&2
+    fi
     exit 1
 fi
 
