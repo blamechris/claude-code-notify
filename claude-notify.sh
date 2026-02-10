@@ -122,6 +122,11 @@ if [ "$HOOK_EVENT" = "PostToolUse" ]; then
                 if WEBHOOK_ID_TOKEN=$(extract_webhook_id_token "$CLAUDE_NOTIFY_WEBHOOK"); then
                     # Build approval payload (green color)
                     APPROVAL_COLOR="${CLAUDE_NOTIFY_APPROVAL_COLOR:-3066993}"  # Green #2ECC71
+                    # Validate approval color is in Discord range (0-16777215)
+                    if ! validate_color "$APPROVAL_COLOR"; then
+                        echo "claude-notify: warning: CLAUDE_NOTIFY_APPROVAL_COLOR '$APPROVAL_COLOR' is out of range (0-16777215), using default" >&2
+                        APPROVAL_COLOR="3066993"
+                    fi
                     TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
                     BOT_NAME="${CLAUDE_NOTIFY_BOT_NAME:-Claude Code}"
 
@@ -192,6 +197,15 @@ command -v curl &>/dev/null || { echo "claude-notify: curl is required" >&2; exi
 NOTIFICATION_TYPE=$(echo "$INPUT" | jq -r '.notification_type // empty' 2>/dev/null)
 MESSAGE=$(echo "$INPUT" | jq -r '.message // empty' 2>/dev/null)
 
+# -- Color validation (Discord embed colors are 24-bit: 0-16777215) --
+validate_color() {
+    local color="$1"
+    if [ -n "$color" ] && [[ "$color" =~ ^[0-9]+$ ]] && [ "$color" -ge 0 ] && [ "$color" -le 16777215 ]; then
+        return 0
+    fi
+    return 1
+}
+
 # -- Project colors (Discord embed sidebar, decimal RGB) --
 # Customize these for your projects. Color values are decimal integers.
 # Use https://www.spycolor.com to convert hex → decimal.
@@ -204,7 +218,13 @@ get_project_color() {
         case "$event_type" in
             permission_prompt)
                 # Orange for permission prompts (urgent, needs attention)
-                echo "${CLAUDE_NOTIFY_PERMISSION_COLOR:-16753920}"
+                local perm_color="${CLAUDE_NOTIFY_PERMISSION_COLOR:-16753920}"
+                if validate_color "$perm_color"; then
+                    echo "$perm_color"
+                else
+                    echo "claude-notify: warning: CLAUDE_NOTIFY_PERMISSION_COLOR '$perm_color' is out of range (0-16777215), using default" >&2
+                    echo "16753920"
+                fi
                 return
                 ;;
         esac
@@ -214,9 +234,13 @@ get_project_color() {
     if [ -f "$NOTIFY_DIR/colors.conf" ]; then
         local color
         color=$(grep -m1 "^${project}=" "$NOTIFY_DIR/colors.conf" 2>/dev/null | cut -d= -f2- || true)
-        if [ -n "$color" ] && [[ "$color" =~ ^[0-9]+$ ]]; then
-            echo "$color"
-            return
+        if [ -n "$color" ]; then
+            if validate_color "$color"; then
+                echo "$color"
+                return
+            else
+                echo "claude-notify: warning: color for project '$project' is out of range '$color' (0-16777215), using default" >&2
+            fi
         fi
     fi
 
