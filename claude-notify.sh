@@ -323,8 +323,8 @@ PAYLOAD=$(jq -c -n \
         }]
     }')
 
-# Delete old message if cleanup is enabled
-if [ "${CLAUDE_NOTIFY_CLEANUP_OLD:-false}" = "true" ]; then
+# Delete old message if cleanup is enabled (but NOT for permission messages - keep audit history)
+if [ "${CLAUDE_NOTIFY_CLEANUP_OLD:-false}" = "true" ] && [ "$NOTIFICATION_TYPE" != "permission_prompt" ]; then
     MESSAGE_ID_FILE="$THROTTLE_DIR/msg-${PROJECT_NAME}-${NOTIFICATION_TYPE}"
     if [ -f "$MESSAGE_ID_FILE" ]; then
         OLD_MESSAGE_ID=$(cat "$MESSAGE_ID_FILE" 2>/dev/null || true)
