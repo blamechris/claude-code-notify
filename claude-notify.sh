@@ -195,8 +195,14 @@ write_status_msg_id() {
     echo "$1" > "$THROTTLE_DIR/status-msg-${PROJECT_NAME}"
 }
 
+# Clear status/throttle/subagent files for a project.
+# Pass "keep_msg_id" to preserve the Discord message ID
+# (SessionEnd needs this so the next SessionStart can delete the offline message).
 clear_status_files() {
-    rm -f "$THROTTLE_DIR/status-msg-${PROJECT_NAME}" 2>/dev/null || true
+    local mode="${1:-}"
+    if [ "$mode" != "keep_msg_id" ]; then
+        rm -f "$THROTTLE_DIR/status-msg-${PROJECT_NAME}" 2>/dev/null || true
+    fi
     rm -f "$THROTTLE_DIR/status-state-${PROJECT_NAME}" 2>/dev/null || true
     rm -f "$THROTTLE_DIR/last-idle-count-${PROJECT_NAME}" 2>/dev/null || true
     rm -f "$THROTTLE_DIR/subagent-count-${PROJECT_NAME}" 2>/dev/null || true
@@ -493,12 +499,7 @@ if [ "$HOOK_EVENT" = "SessionEnd" ]; then
     if [ -n "$CURRENT_STATE" ] && [ "$CURRENT_STATE" != "offline" ]; then
         patch_status_message "offline"
     fi
-    # Clear state, throttle, and subagent files but KEEP msg ID —
-    # the next SessionStart needs it to delete the offline message
-    rm -f "$THROTTLE_DIR/status-state-${PROJECT_NAME}" 2>/dev/null || true
-    rm -f "$THROTTLE_DIR/last-idle-count-${PROJECT_NAME}" 2>/dev/null || true
-    rm -f "$THROTTLE_DIR/subagent-count-${PROJECT_NAME}" 2>/dev/null || true
-    rm -f "$THROTTLE_DIR/last-idle-busy-${PROJECT_NAME}" 2>/dev/null || true
+    clear_status_files "keep_msg_id"
     exit 0
 fi
 

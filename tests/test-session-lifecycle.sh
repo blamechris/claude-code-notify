@@ -73,12 +73,44 @@ assert_true "Project B msg untouched" [ -f "$THROTTLE_DIR/status-msg-projB" ]
 assert_eq "Project B state still idle" "idle" "$(cat "$THROTTLE_DIR/status-state-projB")"
 rm -f "$THROTTLE_DIR/status-msg-projA" "$THROTTLE_DIR/status-msg-projB" "$THROTTLE_DIR/status-state-projB"
 
-# 6. clear_status_files also removes idle count file
+# 6. clear_status_files removes all tracking files
+PROJECT_NAME="$PROJECT"
+clear_status_files() {
+    local mode="${1:-}"
+    if [ "$mode" != "keep_msg_id" ]; then
+        rm -f "$THROTTLE_DIR/status-msg-${PROJECT_NAME}" 2>/dev/null || true
+    fi
+    rm -f "$THROTTLE_DIR/status-state-${PROJECT_NAME}" 2>/dev/null || true
+    rm -f "$THROTTLE_DIR/last-idle-count-${PROJECT_NAME}" 2>/dev/null || true
+    rm -f "$THROTTLE_DIR/subagent-count-${PROJECT_NAME}" 2>/dev/null || true
+    rm -f "$THROTTLE_DIR/last-idle-busy-${PROJECT_NAME}" 2>/dev/null || true
+}
 echo "msg-200" > "$THROTTLE_DIR/status-msg-${PROJECT}"
 echo "idle_busy" > "$THROTTLE_DIR/status-state-${PROJECT}"
 echo "3" > "$THROTTLE_DIR/last-idle-count-${PROJECT}"
-rm -f "$THROTTLE_DIR/status-msg-${PROJECT}" "$THROTTLE_DIR/status-state-${PROJECT}" "$THROTTLE_DIR/last-idle-count-${PROJECT}"
+echo "2" > "$THROTTLE_DIR/subagent-count-${PROJECT}"
+echo "12345" > "$THROTTLE_DIR/last-idle-busy-${PROJECT}"
+clear_status_files
+assert_false "Msg file cleared" [ -f "$THROTTLE_DIR/status-msg-${PROJECT}" ]
+assert_false "State file cleared" [ -f "$THROTTLE_DIR/status-state-${PROJECT}" ]
 assert_false "Idle count file cleared" [ -f "$THROTTLE_DIR/last-idle-count-${PROJECT}" ]
+assert_false "Subagent count file cleared" [ -f "$THROTTLE_DIR/subagent-count-${PROJECT}" ]
+assert_false "Idle-busy throttle file cleared" [ -f "$THROTTLE_DIR/last-idle-busy-${PROJECT}" ]
+
+# 6b. clear_status_files with keep_msg_id preserves msg ID (SessionEnd behavior)
+echo "msg-300" > "$THROTTLE_DIR/status-msg-${PROJECT}"
+echo "offline" > "$THROTTLE_DIR/status-state-${PROJECT}"
+echo "5" > "$THROTTLE_DIR/last-idle-count-${PROJECT}"
+echo "4" > "$THROTTLE_DIR/subagent-count-${PROJECT}"
+echo "99999" > "$THROTTLE_DIR/last-idle-busy-${PROJECT}"
+clear_status_files "keep_msg_id"
+assert_true "Msg ID preserved with keep_msg_id" [ -f "$THROTTLE_DIR/status-msg-${PROJECT}" ]
+assert_eq "Msg ID content preserved" "msg-300" "$(cat "$THROTTLE_DIR/status-msg-${PROJECT}")"
+assert_false "State file cleared with keep_msg_id" [ -f "$THROTTLE_DIR/status-state-${PROJECT}" ]
+assert_false "Idle count cleared with keep_msg_id" [ -f "$THROTTLE_DIR/last-idle-count-${PROJECT}" ]
+assert_false "Subagent count cleared with keep_msg_id" [ -f "$THROTTLE_DIR/subagent-count-${PROJECT}" ]
+assert_false "Idle-busy throttle cleared with keep_msg_id" [ -f "$THROTTLE_DIR/last-idle-busy-${PROJECT}" ]
+rm -f "$THROTTLE_DIR/status-msg-${PROJECT}"
 
 # 7. SessionStart on fresh project (no pre-existing files)
 rm -f "$THROTTLE_DIR/status-msg-${PROJECT}" "$THROTTLE_DIR/status-state-${PROJECT}"
