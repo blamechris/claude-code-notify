@@ -194,7 +194,7 @@ build_extra_fields() {
 safe_write_file() {
     local file="$1"
     local content="$2"
-    if ! echo "$content" > "$file" 2>/dev/null; then
+    if ! printf '%s\n' "$content" > "$file" 2>/dev/null; then
         echo "claude-notify: warning: failed to write to $file" >&2
     fi
     return 0
