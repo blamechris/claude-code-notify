@@ -118,10 +118,8 @@ if [ "$HOOK_EVENT" = "PostToolUse" ]; then
             MESSAGE_ID=$(cat "$PERMISSION_MSG_FILE" 2>/dev/null)
 
             if [ -n "$MESSAGE_ID" ]; then
-                # Extract webhook ID and token for PATCH endpoint
-                WEBHOOK_ID_TOKEN=$(echo "$CLAUDE_NOTIFY_WEBHOOK" | sed -n 's|.*/webhooks/\([0-9]*/[^/?]*\).*|\1|p')
-
-                if [ -n "$WEBHOOK_ID_TOKEN" ]; then
+                # Extract and validate webhook ID and token for PATCH endpoint
+                if WEBHOOK_ID_TOKEN=$(extract_webhook_id_token "$CLAUDE_NOTIFY_WEBHOOK"); then
                     # Build approval payload (green color)
                     APPROVAL_COLOR="${CLAUDE_NOTIFY_APPROVAL_COLOR:-3066993}"  # Green #2ECC71
                     TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -380,9 +378,8 @@ if [ "${CLAUDE_NOTIFY_CLEANUP_OLD:-false}" = "true" ] && [ "$NOTIFICATION_TYPE" 
     if [ -f "$MESSAGE_ID_FILE" ]; then
         OLD_MESSAGE_ID=$(cat "$MESSAGE_ID_FILE" 2>/dev/null || true)
         if [ -n "$OLD_MESSAGE_ID" ]; then
-            # Extract webhook ID and token from URL for message deletion
-            WEBHOOK_ID_TOKEN=$(echo "$CLAUDE_NOTIFY_WEBHOOK" | sed -n 's|.*/webhooks/\([0-9]*/[^/?]*\).*|\1|p')
-            if [ -n "$WEBHOOK_ID_TOKEN" ]; then
+            # Extract and validate webhook ID and token from URL for message deletion
+            if WEBHOOK_ID_TOKEN=$(extract_webhook_id_token "$CLAUDE_NOTIFY_WEBHOOK"); then
                 curl -s -o /dev/null -X DELETE \
                     "https://discord.com/api/webhooks/${WEBHOOK_ID_TOKEN}/messages/${OLD_MESSAGE_ID}" \
                     2>/dev/null || true
