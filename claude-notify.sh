@@ -91,6 +91,74 @@ TOOL_INPUT=$(echo "$INPUT" | jq -r '.tool_input // empty' 2>/dev/null)
 # Per-project subagent count file
 SUBAGENT_COUNT_FILE="$THROTTLE_DIR/subagent-count-${PROJECT_NAME}"
 
+# -- Helper functions (must be defined before use) --
+
+# Validate Discord color is in range 0-16777215 (24-bit RGB)
+validate_color() {
+    local color="$1"
+    if [ -n "$color" ] && [[ "$color" =~ ^[0-9]+$ ]] && [ "$color" -ge 0 ] && [ "$color" -le 16777215 ]; then
+        return 0
+    fi
+    return 1
+}
+
+# Extract and validate webhook ID/token from Discord webhook URL
+# Handles variations: query params, trailing slashes, fragments
+extract_webhook_id_token() {
+    local webhook_url="$1"
+
+    # Extract ID/TOKEN from URL, removing query params and fragments
+    local id_token=$(echo "$webhook_url" | jq -R 'split("/webhooks/")[1] | split("?")[0] | split("#")[0] | gsub("/$"; "")' 2>/dev/null || true)
+
+    # Remove jq's JSON quotes if present
+    id_token="${id_token%\"}"
+    id_token="${id_token#\"}"
+
+    # Validate format: ID (numeric) / TOKEN (alphanumeric, dashes, underscores)
+    if [[ "$id_token" =~ ^[0-9]+/[A-Za-z0-9_-]+$ ]]; then
+        echo "$id_token"
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Build extra context fields for notifications (if enabled via env vars)
+build_extra_fields() {
+    local extra_fields="[]"
+
+    # Session info (session ID, permission mode)
+    if [ "${CLAUDE_NOTIFY_SHOW_SESSION_INFO:-false}" = "true" ]; then
+        if [ -n "$SESSION_ID" ]; then
+            local short_id="${SESSION_ID:0:8}"
+            extra_fields=$(echo "$extra_fields" | jq -c --arg id "$short_id" '. + [{"name": "Session", "value": $id, "inline": true}]')
+        fi
+        if [ -n "$PERMISSION_MODE" ]; then
+            extra_fields=$(echo "$extra_fields" | jq -c --arg mode "$PERMISSION_MODE" '. + [{"name": "Permission Mode", "value": $mode, "inline": true}]')
+        fi
+    fi
+
+    # Full path (instead of just project name)
+    if [ "${CLAUDE_NOTIFY_SHOW_FULL_PATH:-false}" = "true" ] && [ -n "$CWD" ]; then
+        extra_fields=$(echo "$extra_fields" | jq -c --arg path "$CWD" '. + [{"name": "Path", "value": $path, "inline": false}]')
+    fi
+
+    # Tool info (for permissions)
+    if [ "${CLAUDE_NOTIFY_SHOW_TOOL_INFO:-false}" = "true" ] && [ -n "$TOOL_NAME" ]; then
+        extra_fields=$(echo "$extra_fields" | jq -c --arg tool "$TOOL_NAME" '. + [{"name": "Tool", "value": $tool, "inline": true}]')
+
+        # Tool input (truncated for safety)
+        if [ -n "$TOOL_INPUT" ] && [ "$TOOL_INPUT" != "null" ]; then
+            local tool_detail=$(echo "$TOOL_INPUT" | jq -r 'if type == "object" then (.command // .file_path // "...") else . end' 2>/dev/null | head -c 200)
+            if [ -n "$tool_detail" ] && [ "$tool_detail" != "null" ]; then
+                extra_fields=$(echo "$extra_fields" | jq -c --arg detail "$tool_detail" '. + [{"name": "Command", "value": $detail, "inline": false}]')
+            fi
+        fi
+    fi
+
+    echo "$extra_fields"
+}
+
 # -- Subagent tracking (no webhook needed) --
 
 if [ "$HOOK_EVENT" = "SubagentStart" ]; then
@@ -332,15 +400,6 @@ command -v curl &>/dev/null || { echo "claude-notify: curl is required" >&2; exi
 NOTIFICATION_TYPE=$(echo "$INPUT" | jq -r '.notification_type // empty' 2>/dev/null)
 MESSAGE=$(echo "$INPUT" | jq -r '.message // empty' 2>/dev/null)
 
-# -- Color validation (Discord embed colors are 24-bit: 0-16777215) --
-validate_color() {
-    local color="$1"
-    if [ -n "$color" ] && [[ "$color" =~ ^[0-9]+$ ]] && [ "$color" -ge 0 ] && [ "$color" -le 16777215 ]; then
-        return 0
-    fi
-    return 1
-}
-
 # -- Project colors (Discord embed sidebar, decimal RGB) --
 # Customize these for your projects. Color values are decimal integers.
 # Use https://www.spycolor.com to convert hex → decimal.
@@ -385,27 +444,6 @@ get_project_color() {
     esac
 }
 
-# -- Extract and validate webhook ID/token --
-# Handles variations in Discord webhook URLs (query params, trailing slashes, fragments)
-extract_webhook_id_token() {
-    local webhook_url="$1"
-
-    # Extract ID/TOKEN from URL, removing query params and fragments
-    local id_token=$(echo "$webhook_url" | jq -R 'split("/webhooks/")[1] | split("?")[0] | split("#")[0] | gsub("/$"; "")' 2>/dev/null || true)
-
-    # Remove jq's JSON quotes if present
-    id_token="${id_token%\"}"
-    id_token="${id_token#\"}"
-
-    # Validate format: ID (numeric) / TOKEN (alphanumeric, dashes, underscores)
-    if [[ "$id_token" =~ ^[0-9]+/[A-Za-z0-9_-]+$ ]]; then
-        echo "$id_token"
-        return 0
-    else
-        return 1
-    fi
-}
-
 # -- Status emoji --
 get_status_emoji() {
     case "$1" in
@@ -414,42 +452,6 @@ get_status_emoji() {
         permission)    echo "🔐" ;;
         *)             echo "📝" ;;
     esac
-}
-
-# -- Build extra context fields (if enabled) --
-build_extra_fields() {
-    local extra_fields="[]"
-
-    # Session info (session ID, permission mode)
-    if [ "${CLAUDE_NOTIFY_SHOW_SESSION_INFO:-false}" = "true" ]; then
-        if [ -n "$SESSION_ID" ]; then
-            local short_id="${SESSION_ID:0:8}"
-            extra_fields=$(echo "$extra_fields" | jq -c --arg id "$short_id" '. + [{"name": "Session", "value": $id, "inline": true}]')
-        fi
-        if [ -n "$PERMISSION_MODE" ]; then
-            extra_fields=$(echo "$extra_fields" | jq -c --arg mode "$PERMISSION_MODE" '. + [{"name": "Permission Mode", "value": $mode, "inline": true}]')
-        fi
-    fi
-
-    # Full path (instead of just project name)
-    if [ "${CLAUDE_NOTIFY_SHOW_FULL_PATH:-false}" = "true" ] && [ -n "$CWD" ]; then
-        extra_fields=$(echo "$extra_fields" | jq -c --arg path "$CWD" '. + [{"name": "Path", "value": $path, "inline": false}]')
-    fi
-
-    # Tool info (for permissions)
-    if [ "${CLAUDE_NOTIFY_SHOW_TOOL_INFO:-false}" = "true" ] && [ -n "$TOOL_NAME" ]; then
-        extra_fields=$(echo "$extra_fields" | jq -c --arg tool "$TOOL_NAME" '. + [{"name": "Tool", "value": $tool, "inline": true}]')
-
-        # Tool input (truncated for safety)
-        if [ -n "$TOOL_INPUT" ] && [ "$TOOL_INPUT" != "null" ]; then
-            local tool_detail=$(echo "$TOOL_INPUT" | jq -r 'if type == "object" then (.command // .file_path // "...") else . end' 2>/dev/null | head -c 200)
-            if [ -n "$tool_detail" ] && [ "$tool_detail" != "null" ]; then
-                extra_fields=$(echo "$extra_fields" | jq -c --arg detail "$tool_detail" '. + [{"name": "Command", "value": $detail, "inline": false}]')
-            fi
-        fi
-    fi
-
-    echo "$extra_fields"
 }
 
 # -- Throttle helper --
