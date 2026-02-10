@@ -77,7 +77,15 @@ HOOK_EVENT=$(echo "$INPUT" | jq -r '.hook_event_name // empty' 2>/dev/null)
 # Extract project name early — needed by SubagentStart/Stop too
 CWD=$(echo "$INPUT" | jq -r '.cwd // empty' 2>/dev/null)
 PROJECT_NAME="unknown"
-[ -n "$CWD" ] && PROJECT_NAME=$(basename "$CWD")
+if [ -n "$CWD" ]; then
+    # Prefer git repo root name (fixes monorepo paths like chroxy/packages/app → chroxy)
+    GIT_ROOT=$(git -C "$CWD" rev-parse --show-toplevel 2>/dev/null || true)
+    if [ -n "$GIT_ROOT" ]; then
+        PROJECT_NAME=$(basename "$GIT_ROOT")
+    else
+        PROJECT_NAME=$(basename "$CWD")
+    fi
+fi
 PROJECT_NAME=$(echo "$PROJECT_NAME" | tr -cd 'A-Za-z0-9._-')
 # Ensure PROJECT_NAME is never empty after sanitization (fixes Issue #38)
 [ -z "$PROJECT_NAME" ] && PROJECT_NAME="unknown"
@@ -159,6 +167,24 @@ build_extra_fields() {
     echo "$extra_fields"
 }
 
+# Delete a Discord message by its ID file path
+# Usage: delete_discord_message "$msg_file"
+# Reads message ID from file, sends DELETE to Discord API, removes the file.
+# No-op if file doesn't exist or webhook ID can't be extracted.
+delete_discord_message() {
+    local msg_file="$1"
+    [ -f "$msg_file" ] || return 0
+    local msg_id
+    msg_id=$(cat "$msg_file" 2>/dev/null || true)
+    [ -z "$msg_id" ] && return 0
+    if WEBHOOK_ID_TOKEN=$(extract_webhook_id_token "$CLAUDE_NOTIFY_WEBHOOK"); then
+        curl -s -o /dev/null -X DELETE \
+            "https://discord.com/api/webhooks/${WEBHOOK_ID_TOKEN}/messages/${msg_id}" \
+            2>/dev/null || true
+    fi
+    rm -f "$msg_file" 2>/dev/null || true
+}
+
 # -- Subagent tracking (no webhook needed) --
 
 if [ "$HOOK_EVENT" = "SubagentStart" ]; then
@@ -188,6 +214,10 @@ fi
 if [ "$HOOK_EVENT" = "SessionStart" ]; then
     # Validate webhook URL
     [ -z "${CLAUDE_NOTIFY_WEBHOOK:-}" ] && exit 0
+
+    # Delete previous session message for this project (prevents pileup)
+    SESSION_MSG_FILE="$THROTTLE_DIR/msg-${PROJECT_NAME}-session"
+    delete_discord_message "$SESSION_MSG_FILE"
 
     # Build "Session Online" notification (green)
     ONLINE_COLOR="${CLAUDE_NOTIFY_ONLINE_COLOR:-3066993}"  # Green #2ECC71
@@ -219,10 +249,21 @@ if [ "$HOOK_EVENT" = "SessionStart" ]; then
             }]
         }')
 
-    curl -s -o /dev/null \
+    # Send and capture message ID for future cleanup/PATCH
+    RESPONSE=$(curl -s -w "\n%{http_code}" \
         -H "Content-Type: application/json" \
         -d "$PAYLOAD" \
-        "$CLAUDE_NOTIFY_WEBHOOK" 2>/dev/null || true
+        "$CLAUDE_NOTIFY_WEBHOOK?wait=true" 2>/dev/null || true)
+
+    HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+    RESPONSE_BODY=$(echo "$RESPONSE" | sed '$d')
+
+    if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "204" ]; then
+        MESSAGE_ID=$(echo "$RESPONSE_BODY" | jq -r '.id // empty' 2>/dev/null)
+        if [ -n "$MESSAGE_ID" ]; then
+            echo "$MESSAGE_ID" > "$SESSION_MSG_FILE"
+        fi
+    fi
 
     exit 0
 fi
@@ -231,7 +272,9 @@ if [ "$HOOK_EVENT" = "SessionEnd" ]; then
     # Validate webhook URL
     [ -z "${CLAUDE_NOTIFY_WEBHOOK:-}" ] && exit 0
 
-    # Find most recent message ID (check idle, then permission)
+    SESSION_MSG_FILE="$THROTTLE_DIR/msg-${PROJECT_NAME}-session"
+
+    # Find most recent message ID (check idle, then permission, then session)
     MESSAGE_ID=""
     MESSAGE_ID_FILE=""
 
@@ -245,6 +288,12 @@ if [ "$HOOK_EVENT" = "SessionEnd" ]; then
     if [ -z "$MESSAGE_ID" ] && [ -f "$THROTTLE_DIR/msg-${PROJECT_NAME}-permission_prompt" ]; then
         MESSAGE_ID=$(cat "$THROTTLE_DIR/msg-${PROJECT_NAME}-permission_prompt" 2>/dev/null || true)
         MESSAGE_ID_FILE="$THROTTLE_DIR/msg-${PROJECT_NAME}-permission_prompt"
+    fi
+
+    # If no idle or permission, fall back to session message
+    if [ -z "$MESSAGE_ID" ] && [ -f "$SESSION_MSG_FILE" ]; then
+        MESSAGE_ID=$(cat "$SESSION_MSG_FILE" 2>/dev/null || true)
+        MESSAGE_ID_FILE="$SESSION_MSG_FILE"
     fi
 
     # If we found a message, PATCH it to offline status
@@ -288,11 +337,9 @@ if [ "$HOOK_EVENT" = "SessionEnd" ]; then
                     "https://discord.com/api/webhooks/${WEBHOOK_ID_TOKEN}/messages/${MESSAGE_ID}")
 
                 if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "204" ]; then
-                    # Success - clean up message ID file
-                    if ! rm -f "$MESSAGE_ID_FILE" 2>/dev/null; then
-                        echo "claude-notify: warning: failed to delete message ID file: $MESSAGE_ID_FILE" >&2
-                    fi
-                    exit 0
+                    # Success - clean up the message ID file that was PATCHed
+                    rm -f "$MESSAGE_ID_FILE" 2>/dev/null || true
+                    break
                 fi
 
                 # Retry with backoff
@@ -302,6 +349,10 @@ if [ "$HOOK_EVENT" = "SessionEnd" ]; then
             done
         fi
     fi
+
+    # Always delete session message from Discord on SessionEnd
+    # (prevents stale "Session Online" when idle/permission was PATCHed instead)
+    delete_discord_message "$SESSION_MSG_FILE"
 
     exit 0
 fi
@@ -366,9 +417,9 @@ if [ "$HOOK_EVENT" = "PostToolUse" ]; then
 
                         if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "204" ]; then
                             # Success - clean up the message ID file so we don't re-update
-                            if ! rm -f "$PERMISSION_MSG_FILE" 2>/dev/null; then
-                                echo "claude-notify: warning: failed to delete permission message ID file: $PERMISSION_MSG_FILE" >&2
-                            fi
+                            rm -f "$PERMISSION_MSG_FILE" 2>/dev/null || true
+                            # Also clear stale idle message (user is active now)
+                            delete_discord_message "$THROTTLE_DIR/msg-${PROJECT_NAME}-idle_prompt"
                             exit 0
                         fi
 
@@ -380,6 +431,10 @@ if [ "$HOOK_EVENT" = "PostToolUse" ]; then
                 fi
             fi
         fi
+
+    # Clear stale idle message on any PostToolUse (agent is working, not idle)
+    IDLE_MSG_FILE="$THROTTLE_DIR/msg-${PROJECT_NAME}-idle_prompt"
+    delete_discord_message "$IDLE_MSG_FILE"
 
     exit 0
 fi
