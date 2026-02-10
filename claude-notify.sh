@@ -1,14 +1,14 @@
 #!/bin/bash
 # claude-notify.sh — Discord notifications for Claude Code sessions
 #
-# Maintains a single status message per project, updated via PATCH:
-#   SessionStart   → POST  "🟢 Session Online"
-#   Agent idle     → PATCH "🦀 Ready for input"
-#   User types     → PATCH "🟢 Session Online"
-#   Permission     → PATCH "🔐 Needs Approval"
-#   User approves  → PATCH "✅ Permission Approved"
-#   Agent works    → PATCH "🟢 Session Online"
-#   SessionEnd     → PATCH "🔴 Session Offline"
+# Maintains a single status message per project:
+#   SessionStart   → DELETE old + POST  "🟢 Session Online"
+#   Agent idle     → DELETE old + POST  "🦀 Ready for input"   (triggers ping)
+#   User input     → PATCH               "🟢 Session Online"
+#   Permission     → DELETE old + POST  "🔐 Needs Approval"   (triggers ping)
+#   User approves  → PATCH               "✅ Permission Approved"
+#   Agent works    → PATCH               "🟢 Session Online"
+#   SessionEnd     → PATCH               "🔴 Session Offline"
 #
 # Designed as a Claude Code hook (Notification, SubagentStart/Stop,
 # SessionStart/End, PostToolUse).
@@ -290,6 +290,14 @@ build_status_payload() {
             fi
             title="🔴 ${PROJECT_NAME} — Session Offline"
             local base=$(jq -c -n '[{"name": "Status", "value": "Session ended", "inline": false}]')
+            fields=$(jq -c -n --argjson base "$base" --argjson extra "$extra_fields" '$base + $extra')
+            ;;
+        *)
+            echo "claude-notify: warning: unknown state '$state', defaulting to online" >&2
+            color="${CLAUDE_NOTIFY_ONLINE_COLOR:-3066993}"
+            if ! validate_color "$color"; then color="3066993"; fi
+            title="🟢 ${PROJECT_NAME} — Session Online"
+            local base=$(jq -c -n '[{"name": "Status", "value": "Session started", "inline": false}]')
             fields=$(jq -c -n --argjson base "$base" --argjson extra "$extra_fields" '$base + $extra')
             ;;
     esac

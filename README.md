@@ -245,22 +245,22 @@ This removes hooks from `settings.json` but leaves your config in `~/.claude-not
 
 ## How it works
 
-Claude Code's [hooks system](https://docs.anthropic.com/en/docs/claude-code) fires events as JSON on stdin. This script maintains a **single Discord message per project** that gets PATCHed through a state machine:
+Claude Code's [hooks system](https://docs.anthropic.com/en/docs/claude-code) fires events as JSON on stdin. This script maintains a **single Discord message per project** through a state machine. Important states (idle, permission) DELETE the old message and POST a new one so they appear at the bottom of the channel and trigger Discord pings. Background transitions (online, approved, offline) use PATCH to update quietly in place.
 
 ```
-SessionStart   → POST  "🟢 Session Online"
-Agent idle     → PATCH "🦀 Ready for input"
-User input     → PATCH "🟢 Session Online"
-Permission     → PATCH "🔐 Needs Approval"
-User approves  → PATCH "✅ Permission Approved"
-Agent works    → PATCH "🟢 Session Online"
-SessionEnd     → PATCH "🔴 Session Offline"
+SessionStart   → DELETE old + POST  "🟢 Session Online"
+Agent idle     → DELETE old + POST  "🦀 Ready for input"   (ping)
+User input     → PATCH               "🟢 Session Online"
+Permission     → DELETE old + POST  "🔐 Needs Approval"   (ping)
+User approves  → PATCH               "✅ Permission Approved"
+Agent works    → PATCH               "🟢 Session Online"
+SessionEnd     → PATCH               "🔴 Session Offline"
 ```
 
 Hook types used:
-- **`SessionStart`** — creates the status message (POST)
-- **`Notification`** (`idle_prompt`, `permission_prompt`) — updates status (PATCH)
-- **`PostToolUse`** — detects approvals and user activity (PATCH)
+- **`SessionStart`** — deletes previous offline message, creates new status message (DELETE + POST)
+- **`Notification`** (`idle_prompt`, `permission_prompt`) — repost for visibility (DELETE + POST)
+- **`PostToolUse`** — detects approvals and user activity (PATCH, quiet)
 - **`SessionEnd`** — marks offline (PATCH), cleans up state files
 - **`SubagentStart`** / **`SubagentStop`** — tracks per-project subagent counts
 
