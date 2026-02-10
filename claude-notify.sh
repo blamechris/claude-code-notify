@@ -152,7 +152,9 @@ if [ "$HOOK_EVENT" = "PostToolUse" ]; then
 
                         if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "204" ]; then
                             # Success - clean up the message ID file so we don't re-update
-                            rm -f "$PERMISSION_MSG_FILE"
+                            if ! rm -f "$PERMISSION_MSG_FILE" 2>/dev/null; then
+                                echo "claude-notify: warning: failed to delete permission message ID file: $PERMISSION_MSG_FILE" >&2
+                            fi
                             exit 0
                         fi
 
