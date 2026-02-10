@@ -199,6 +199,8 @@ clear_status_files() {
     rm -f "$THROTTLE_DIR/status-msg-${PROJECT_NAME}" 2>/dev/null || true
     rm -f "$THROTTLE_DIR/status-state-${PROJECT_NAME}" 2>/dev/null || true
     rm -f "$THROTTLE_DIR/last-idle-count-${PROJECT_NAME}" 2>/dev/null || true
+    rm -f "$THROTTLE_DIR/subagent-count-${PROJECT_NAME}" 2>/dev/null || true
+    rm -f "$THROTTLE_DIR/last-idle-busy-${PROJECT_NAME}" 2>/dev/null || true
 }
 
 # -- Project colors (Discord embed sidebar, decimal RGB) --
@@ -491,10 +493,12 @@ if [ "$HOOK_EVENT" = "SessionEnd" ]; then
     if [ -n "$CURRENT_STATE" ] && [ "$CURRENT_STATE" != "offline" ]; then
         patch_status_message "offline"
     fi
-    # Clear state and throttle files but KEEP msg ID —
+    # Clear state, throttle, and subagent files but KEEP msg ID —
     # the next SessionStart needs it to delete the offline message
     rm -f "$THROTTLE_DIR/status-state-${PROJECT_NAME}" 2>/dev/null || true
     rm -f "$THROTTLE_DIR/last-idle-count-${PROJECT_NAME}" 2>/dev/null || true
+    rm -f "$THROTTLE_DIR/subagent-count-${PROJECT_NAME}" 2>/dev/null || true
+    rm -f "$THROTTLE_DIR/last-idle-busy-${PROJECT_NAME}" 2>/dev/null || true
     exit 0
 fi
 
