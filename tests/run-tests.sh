@@ -113,15 +113,13 @@ echo "DEBUG: About to iterate test files..." >&2
 for test_file in "$TESTS_DIR"/test-*.sh; do
     echo "DEBUG: Found file: $test_file" >&2
 
-    # Skip if not a file
-    if [ ! -f "$test_file" ]; then
-        echo "DEBUG: Not a file, skipping" >&2
-        continue
-    fi
-
+    echo "DEBUG: Calling basename..." >&2
     test_name=$(basename "$test_file" .sh)
+    echo "DEBUG: test_name=$test_name" >&2
+
+    echo "DEBUG: Incrementing counter..." >&2
     ((total_files++))
-    echo "DEBUG: Running test $total_files: $test_name" >&2
+    echo "DEBUG: total_files=$total_files" >&2
 
     printf "[%s]\n" "$test_name"
 
