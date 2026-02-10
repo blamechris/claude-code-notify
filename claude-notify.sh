@@ -64,6 +64,8 @@ CWD=$(echo "$INPUT" | jq -r '.cwd // empty' 2>/dev/null)
 PROJECT_NAME="unknown"
 [ -n "$CWD" ] && PROJECT_NAME=$(basename "$CWD")
 PROJECT_NAME=$(echo "$PROJECT_NAME" | tr -cd 'A-Za-z0-9._-')
+# Ensure PROJECT_NAME is never empty after sanitization (fixes Issue #38)
+[ -z "$PROJECT_NAME" ] && PROJECT_NAME="unknown"
 
 # Extract additional context fields (for optional display)
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
