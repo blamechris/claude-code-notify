@@ -82,6 +82,33 @@ assert_eq "Webhook URL with very long ID and token" "999888777666555444/abcdefgh
 result=$(extract_webhook_id_token "https://discord.com/api/webhooks/1/a")
 assert_eq "Webhook URL with short ID and token" "1/a" "$result"
 
+# -- Webhook URL format validation tests --
+
+# Helper to check if URL triggers a warning
+validate_webhook_url() {
+    local url="$1"
+    if [[ ! "$url" =~ ^https://discord\.com/api/webhooks/[0-9]+/ ]] && \
+       [[ ! "$url" =~ ^https://discordapp\.com/api/webhooks/[0-9]+/ ]]; then
+        return 1
+    fi
+    return 0
+}
+
+# 13. Valid discord.com webhook URL passes validation
+assert_true "Valid discord.com URL passes" validate_webhook_url "https://discord.com/api/webhooks/123456789/abctoken"
+
+# 14. Valid discordapp.com webhook URL passes validation
+assert_true "Valid discordapp.com URL passes" validate_webhook_url "https://discordapp.com/api/webhooks/123456789/abctoken"
+
+# 15. Random URL fails validation
+assert_false "Random URL fails validation" validate_webhook_url "https://example.com/webhook"
+
+# 16. Empty URL fails validation
+assert_false "Empty URL fails validation" validate_webhook_url ""
+
+# 17. HTTP (non-HTTPS) URL fails validation
+assert_false "HTTP URL fails validation" validate_webhook_url "http://discord.com/api/webhooks/123/abc"
+
 # -- Cleanup and summary --
 
 test_summary

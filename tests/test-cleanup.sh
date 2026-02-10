@@ -89,4 +89,48 @@ assert_eq "Throttle file has correct value" "123" "$(cat "$THROTTLE_DIR/last-idl
 assert_eq "Status msg file has correct value" "msg-abc" "$(cat "$THROTTLE_DIR/status-msg-throttle-test")"
 assert_eq "Status state file has correct value" "idle" "$(cat "$THROTTLE_DIR/status-state-throttle-test")"
 
+# -- load_env_var tests --
+
+NOTIFY_DIR="$TEST_TMPDIR/notify-config"
+mkdir -p "$NOTIFY_DIR"
+cat > "$NOTIFY_DIR/.env" << 'ENVFILE'
+CLAUDE_NOTIFY_WEBHOOK=https://discord.com/api/webhooks/123/abc
+CLAUDE_NOTIFY_BOT_NAME=Test Bot
+ENVFILE
+
+load_env_var() {
+    local var_name="$1"
+    eval "[ -z \"\${${var_name}:-}\" ]" || return 0
+    local val
+    val=$(grep -m1 "^${var_name}=" "$NOTIFY_DIR/.env" 2>/dev/null | cut -d= -f2- || true)
+    [ -n "$val" ] && eval "${var_name}=\$val"
+}
+
+# Loads value from .env when not set
+unset CLAUDE_NOTIFY_BOT_NAME 2>/dev/null || true
+load_env_var CLAUDE_NOTIFY_BOT_NAME
+assert_eq "load_env_var loads from .env" "Test Bot" "${CLAUDE_NOTIFY_BOT_NAME:-}"
+
+# Env var takes precedence over .env
+CLAUDE_NOTIFY_BOT_NAME="Override"
+load_env_var CLAUDE_NOTIFY_BOT_NAME
+assert_eq "Env var takes precedence over .env" "Override" "$CLAUDE_NOTIFY_BOT_NAME"
+
+# Missing var in .env stays empty
+unset CLAUDE_NOTIFY_SHOW_SESSION_INFO 2>/dev/null || true
+load_env_var CLAUDE_NOTIFY_SHOW_SESSION_INFO
+assert_eq "Missing var stays empty" "" "${CLAUDE_NOTIFY_SHOW_SESSION_INFO:-}"
+
+# -- JSON validation tests --
+
+# Valid JSON passes
+VALID_JSON='{"hook_event_name": "Notification"}'
+assert_true "Valid JSON passes jq validation" bash -c "echo '$VALID_JSON' | jq empty 2>/dev/null"
+
+# Invalid JSON fails
+assert_false "Invalid JSON fails jq validation" bash -c "echo 'not json' | jq empty 2>/dev/null"
+
+# Empty input passes (jq empty on empty = ok)
+assert_true "Empty input passes jq validation" bash -c "echo '' | jq empty 2>/dev/null"
+
 test_summary
