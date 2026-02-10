@@ -41,30 +41,10 @@ if [ "${1:-}" = "--uninstall" ]; then
         # Remove hooks that reference claude-notify.sh
         TEMP=$(mktemp); TEMP_FILES+=("$TEMP")
         jq --arg script "$NOTIFY_SCRIPT" '
-            .hooks |= (
-                if .Notification then
-                    .Notification |= map(select(.hooks | all(.command != $script)))
-                    | if .Notification == [] then del(.Notification) else . end
-                else . end
-                | if .SubagentStart then
-                    .SubagentStart |= map(select(.hooks | all(.command != $script)))
-                    | if .SubagentStart == [] then del(.SubagentStart) else . end
-                else . end
-                | if .SubagentStop then
-                    .SubagentStop |= map(select(.hooks | all(.command != $script)))
-                    | if .SubagentStop == [] then del(.SubagentStop) else . end
-                else . end
-                | if .SessionStart then
-                    .SessionStart |= map(select(.hooks | all(.command != $script)))
-                    | if .SessionStart == [] then del(.SessionStart) else . end
-                else . end
-                | if .SessionEnd then
-                    .SessionEnd |= map(select(.hooks | all(.command != $script)))
-                    | if .SessionEnd == [] then del(.SessionEnd) else . end
-                else . end
-                | if .PostToolUse then
-                    .PostToolUse |= map(select(.hooks | all(.command != $script)))
-                    | if .PostToolUse == [] then del(.PostToolUse) else . end
+            .hooks |= with_entries(
+                if (.value | type) == "array" then
+                    .value |= map(select(.hooks | all(.command != $script)))
+                    | if .value == [] then empty else . end
                 else . end
             )
         ' "$SETTINGS_FILE" > "$TEMP" && mv "$TEMP" "$SETTINGS_FILE"

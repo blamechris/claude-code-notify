@@ -36,35 +36,39 @@ if ! mkdir -p "$THROTTLE_DIR" 2>/dev/null || [ ! -d "$THROTTLE_DIR" ] || [ ! -w 
     exit 1
 fi
 
+# Load a variable from .env file if not already set via environment
+load_env_var() {
+    local var_name="$1"
+    eval "[ -z \"\${${var_name}:-}\" ]" || return 0
+    local val
+    val=$(grep -m1 "^${var_name}=" "$NOTIFY_DIR/.env" 2>/dev/null | cut -d= -f2- || true)
+    [ -n "$val" ] && eval "${var_name}=\$val"
+}
+
 # Load config from .env file (env vars take precedence)
 if [ -f "$NOTIFY_DIR/.env" ]; then
-    [ -z "${CLAUDE_NOTIFY_WEBHOOK:-}" ] && \
-        CLAUDE_NOTIFY_WEBHOOK=$(grep -m1 '^CLAUDE_NOTIFY_WEBHOOK=' "$NOTIFY_DIR/.env" 2>/dev/null | cut -d= -f2- || true)
-    [ -z "${CLAUDE_NOTIFY_BOT_NAME:-}" ] && \
-        CLAUDE_NOTIFY_BOT_NAME=$(grep -m1 '^CLAUDE_NOTIFY_BOT_NAME=' "$NOTIFY_DIR/.env" 2>/dev/null | cut -d= -f2- || true)
-
-    # Load enhanced context flags
-    [ -z "${CLAUDE_NOTIFY_SHOW_SESSION_INFO:-}" ] && \
-        CLAUDE_NOTIFY_SHOW_SESSION_INFO=$(grep -m1 '^CLAUDE_NOTIFY_SHOW_SESSION_INFO=' "$NOTIFY_DIR/.env" 2>/dev/null | cut -d= -f2- || true)
-    [ -z "${CLAUDE_NOTIFY_SHOW_TOOL_INFO:-}" ] && \
-        CLAUDE_NOTIFY_SHOW_TOOL_INFO=$(grep -m1 '^CLAUDE_NOTIFY_SHOW_TOOL_INFO=' "$NOTIFY_DIR/.env" 2>/dev/null | cut -d= -f2- || true)
-    [ -z "${CLAUDE_NOTIFY_SHOW_FULL_PATH:-}" ] && \
-        CLAUDE_NOTIFY_SHOW_FULL_PATH=$(grep -m1 '^CLAUDE_NOTIFY_SHOW_FULL_PATH=' "$NOTIFY_DIR/.env" 2>/dev/null | cut -d= -f2- || true)
-
-    # Load color overrides
-    [ -z "${CLAUDE_NOTIFY_ONLINE_COLOR:-}" ] && \
-        CLAUDE_NOTIFY_ONLINE_COLOR=$(grep -m1 '^CLAUDE_NOTIFY_ONLINE_COLOR=' "$NOTIFY_DIR/.env" 2>/dev/null | cut -d= -f2- || true)
-    [ -z "${CLAUDE_NOTIFY_OFFLINE_COLOR:-}" ] && \
-        CLAUDE_NOTIFY_OFFLINE_COLOR=$(grep -m1 '^CLAUDE_NOTIFY_OFFLINE_COLOR=' "$NOTIFY_DIR/.env" 2>/dev/null | cut -d= -f2- || true)
-    [ -z "${CLAUDE_NOTIFY_APPROVAL_COLOR:-}" ] && \
-        CLAUDE_NOTIFY_APPROVAL_COLOR=$(grep -m1 '^CLAUDE_NOTIFY_APPROVAL_COLOR=' "$NOTIFY_DIR/.env" 2>/dev/null | cut -d= -f2- || true)
-    [ -z "${CLAUDE_NOTIFY_PERMISSION_COLOR:-}" ] && \
-        CLAUDE_NOTIFY_PERMISSION_COLOR=$(grep -m1 '^CLAUDE_NOTIFY_PERMISSION_COLOR=' "$NOTIFY_DIR/.env" 2>/dev/null | cut -d= -f2- || true)
+    load_env_var CLAUDE_NOTIFY_WEBHOOK
+    load_env_var CLAUDE_NOTIFY_BOT_NAME
+    load_env_var CLAUDE_NOTIFY_SHOW_SESSION_INFO
+    load_env_var CLAUDE_NOTIFY_SHOW_TOOL_INFO
+    load_env_var CLAUDE_NOTIFY_SHOW_FULL_PATH
+    load_env_var CLAUDE_NOTIFY_ONLINE_COLOR
+    load_env_var CLAUDE_NOTIFY_OFFLINE_COLOR
+    load_env_var CLAUDE_NOTIFY_APPROVAL_COLOR
+    load_env_var CLAUDE_NOTIFY_PERMISSION_COLOR
 fi
 
 # Check enabled state (file-based .disabled takes precedence over env var)
 if [ -f "$NOTIFY_DIR/.disabled" ] || [ "${CLAUDE_NOTIFY_ENABLED:-}" = "false" ]; then
     exit 0
+fi
+
+# Validate webhook URL format if set (catches typos/malformed URLs early)
+if [ -n "${CLAUDE_NOTIFY_WEBHOOK:-}" ]; then
+    if [[ ! "$CLAUDE_NOTIFY_WEBHOOK" =~ ^https://discord\.com/api/webhooks/[0-9]+/ ]] && \
+       [[ ! "$CLAUDE_NOTIFY_WEBHOOK" =~ ^https://discordapp\.com/api/webhooks/[0-9]+/ ]]; then
+        echo "claude-notify: warning: CLAUDE_NOTIFY_WEBHOOK doesn't look like a Discord webhook URL" >&2
+    fi
 fi
 
 # -- Dependencies (jq required for JSON parsing) --
@@ -74,6 +78,13 @@ command -v jq &>/dev/null || { echo "claude-notify: jq is required (brew install
 # -- Parse hook input --
 
 INPUT=$(cat 2>/dev/null) || true
+
+# Validate JSON before parsing (catches malformed input early)
+if [ -n "$INPUT" ] && ! echo "$INPUT" | jq empty 2>/dev/null; then
+    echo "claude-notify: warning: received invalid JSON on stdin" >&2
+    INPUT=""
+fi
+
 HOOK_EVENT=$(echo "$INPUT" | jq -r '.hook_event_name // empty' 2>/dev/null)
 [ -z "$HOOK_EVENT" ] && HOOK_EVENT="${1:-}"
 [ -z "$HOOK_EVENT" ] && exit 0
