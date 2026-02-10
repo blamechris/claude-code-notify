@@ -245,20 +245,15 @@ if [ "$HOOK_EVENT" = "PostToolUse" ]; then
     # Check if webhook is configured
     [ -z "${CLAUDE_NOTIFY_WEBHOOK:-}" ] && exit 0
 
-    # Check if there's a recent permission message (within 5 minutes = 300 seconds)
+    # Check if there's a permission message to update
+    # No time limit - some tools can take longer than 5 minutes
     PERMISSION_MSG_FILE="$THROTTLE_DIR/msg-${PROJECT_NAME}-permission_prompt"
     PERMISSION_TIME_FILE="$THROTTLE_DIR/last-permission-${PROJECT_NAME}"
 
-    if [ -f "$PERMISSION_MSG_FILE" ] && [ -f "$PERMISSION_TIME_FILE" ]; then
-        LAST_PERMISSION=$(cat "$PERMISSION_TIME_FILE" 2>/dev/null || echo 0)
-        NOW=$(date +%s)
-        AGE=$((NOW - LAST_PERMISSION))
+    if [ -f "$PERMISSION_MSG_FILE" ]; then
+        MESSAGE_ID=$(cat "$PERMISSION_MSG_FILE" 2>/dev/null)
 
-        # Within 5-minute window - this approval relates to that permission
-        if [ "$AGE" -lt 300 ]; then
-            MESSAGE_ID=$(cat "$PERMISSION_MSG_FILE" 2>/dev/null)
-
-            if [ -n "$MESSAGE_ID" ]; then
+        if [ -n "$MESSAGE_ID" ]; then
                 # Extract and validate webhook ID and token for PATCH endpoint
                 if WEBHOOK_ID_TOKEN=$(extract_webhook_id_token "$CLAUDE_NOTIFY_WEBHOOK"); then
                     # Build approval payload (green color)
@@ -317,7 +312,6 @@ if [ "$HOOK_EVENT" = "PostToolUse" ]; then
                 fi
             fi
         fi
-    fi
 
     exit 0
 fi
