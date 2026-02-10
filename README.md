@@ -127,6 +127,30 @@ CLAUDE_NOTIFY_APPROVAL_TTL=2  # Keep approvals for 2 hours
 
 This keeps your Discord channel clean while maintaining recent approval history.
 
+### Cleaning up test messages
+
+When running tests, `test-proj-*` messages are created in your Discord channel. These are automatically cleaned up when you run the full test suite:
+
+```bash
+# Test suite automatically cleans up test messages at the end
+bash tests/run-tests.sh
+```
+
+You can also manually clean up test messages:
+
+```bash
+# Run manually
+bash scripts/cleanup-test-messages.sh
+
+# Or with explicit credentials
+DISCORD_BOT_TOKEN=<token> bash scripts/cleanup-test-messages.sh <channel_id>
+```
+
+This script:
+- Searches for messages with embed titles containing `test-proj-`
+- Deletes them from your Discord channel
+- Requires `DISCORD_BOT_TOKEN` and `DISCORD_CHANNEL_ID` (from `.env` or env vars)
+
 ### Extra context in notifications
 
 By default, notifications show minimal information (project name, status). You can enable additional context fields:

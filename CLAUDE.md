@@ -36,7 +36,8 @@ claude-code-notify/
 ├── .claude/commands/      # Claude Code skills (check-pr, agent-review)
 ├── scripts/               # Utility scripts
 │   ├── discord-bulk-delete.sh     # Bulk delete messages in a channel (requires bot token)
-│   └── cleanup-old-approvals.sh   # Time-based cleanup for old approved permissions
+│   ├── cleanup-old-approvals.sh   # Time-based cleanup for old approved permissions
+│   └── cleanup-test-messages.sh   # Clean up test-proj-* messages (auto-run by test suite)
 └── tests/                 # Pure bash test suite (11 automated tests, no framework)
     ├── run-tests.sh       # Test runner entry point
     ├── setup.sh           # Shared test environment setup
@@ -70,13 +71,16 @@ claude-code-notify/
 ## Development
 
 ```bash
-# Run tests
+# Run tests (auto-cleans test messages from Discord if credentials available)
 bash tests/run-tests.sh
 
 # Run a single test file
 bash tests/test-throttle.sh
 
-# Bulk delete messages from Discord channel (requires bot token)
+# Clean up test messages from Discord (test-proj-* embeds)
+bash scripts/cleanup-test-messages.sh
+
+# Bulk delete ALL messages from Discord channel (requires bot token)
 DISCORD_BOT_TOKEN=<token> bash scripts/discord-bulk-delete.sh <channel_id>
 
 # Clean up old approved permissions (time-based, default 1 hour TTL)

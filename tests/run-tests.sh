@@ -147,6 +147,18 @@ fi
 
 rm -rf "$TEST_TMPDIR"
 
+# Clean up test messages from Discord (if credentials available)
+if [ -f "$HOME/.claude-notify/.env" ]; then
+    DISCORD_BOT_TOKEN=$(grep -m1 '^DISCORD_BOT_TOKEN=' "$HOME/.claude-notify/.env" 2>/dev/null | cut -d= -f2- || true)
+    DISCORD_CHANNEL_ID=$(grep -m1 '^DISCORD_CHANNEL_ID=' "$HOME/.claude-notify/.env" 2>/dev/null | cut -d= -f2- || true)
+
+    if [ -n "$DISCORD_BOT_TOKEN" ] && [ -n "$DISCORD_CHANNEL_ID" ]; then
+        printf "\n=== Cleaning up test messages from Discord ===\n"
+        export DISCORD_BOT_TOKEN DISCORD_CHANNEL_ID
+        bash "$PROJECT_DIR/scripts/cleanup-test-messages.sh" || true
+    fi
+fi
+
 printf "\n"
 if [ "$total_fail" -eq 0 ] && [ "$total_files" -gt 0 ]; then
     printf "All tests passed.\n"
