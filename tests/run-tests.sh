@@ -11,15 +11,8 @@
 
 set -euo pipefail
 
-echo "DEBUG: Starting test runner..." >&2
-echo "DEBUG: Script: $0" >&2
-echo "DEBUG: PWD: $(pwd)" >&2
-
 TESTS_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$TESTS_DIR")"
-
-echo "DEBUG: TESTS_DIR=$TESTS_DIR" >&2
-echo "DEBUG: PROJECT_DIR=$PROJECT_DIR" >&2
 
 # -- Set up isolated test environment --
 
@@ -49,10 +42,10 @@ assert_eq() {
     local desc="$1" expected="$2" actual="$3"
     if [ "$expected" = "$actual" ]; then
         printf "  PASS: %s\n" "$desc"
-        ((pass++))
+        pass=$((pass + 1))
     else
         printf "  FAIL: %s (expected '%s', got '%s')\n" "$desc" "$expected" "$actual"
-        ((fail++))
+        fail=$((fail + 1))
     fi
 }
 
@@ -60,10 +53,10 @@ assert_match() {
     local desc="$1" pattern="$2" actual="$3"
     if echo "$actual" | grep -qE "$pattern"; then
         printf "  PASS: %s\n" "$desc"
-        ((pass++))
+        pass=$((pass + 1))
     else
         printf "  FAIL: %s (pattern '%s' not found in '%s')\n" "$desc" "$pattern" "$actual"
-        ((fail++))
+        fail=$((fail + 1))
     fi
 }
 
@@ -72,10 +65,10 @@ assert_true() {
     shift
     if "$@"; then
         printf "  PASS: %s\n" "$desc"
-        ((pass++))
+        pass=$((pass + 1))
     else
         printf "  FAIL: %s (command returned non-zero)\n" "$desc"
-        ((fail++))
+        fail=$((fail + 1))
     fi
 }
 
@@ -84,10 +77,10 @@ assert_false() {
     shift
     if "$@"; then
         printf "  FAIL: %s (command returned zero, expected non-zero)\n" "$desc"
-        ((fail++))
+        fail=$((fail + 1))
     else
         printf "  PASS: %s\n" "$desc"
-        ((pass++))
+        pass=$((pass + 1))
     fi
 }
 
@@ -109,26 +102,17 @@ failed_files=()
 
 printf "=== claude-code-notify test suite ===\n\n"
 
-echo "DEBUG: About to iterate test files..." >&2
 for test_file in "$TESTS_DIR"/test-*.sh; do
-    echo "DEBUG: Found file: $test_file" >&2
-
-    echo "DEBUG: Calling basename..." >&2
+    [ -f "$test_file" ] || continue
     test_name=$(basename "$test_file" .sh)
-    echo "DEBUG: test_name=$test_name" >&2
-
-    echo "DEBUG: Incrementing counter..." >&2
     total_files=$((total_files + 1))
-    echo "DEBUG: total_files=$total_files" >&2
 
     printf "[%s]\n" "$test_name"
 
     # Run in a subshell so each test gets a fresh environment.
     # Capture output and exit code.
-    echo "DEBUG: Executing: bash $test_file" >&2
     output=$(bash "$test_file" 2>&1)
     rc=$?
-    echo "DEBUG: Test exited with code $rc" >&2
 
     echo "$output"
 
