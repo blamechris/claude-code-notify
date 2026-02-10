@@ -24,6 +24,13 @@
 - Commit format: `type(scope): description`
 - Types: feat, fix, refactor, docs, chore
 
+**Branch Protection:**
+- Required status check: `check` (CI workflow)
+- Required pull requests for all changes
+- Admin enforcement: DISABLED (backdoor exists for emergencies)
+- **CRITICAL:** Never push directly to main without user's express permission
+- Always create PRs for features, even if you have bypass permissions
+
 ## Project Structure
 
 ```
