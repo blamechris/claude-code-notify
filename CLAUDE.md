@@ -34,13 +34,16 @@ claude-code-notify/
 ├── colors.conf.example    # Example per-project color config
 ├── .env.example           # Example webhook URL config
 ├── .claude/commands/      # Claude Code skills (check-pr, agent-review)
+├── scripts/               # Utility scripts
+│   └── discord-bulk-delete.sh  # Bulk delete messages in a channel (requires bot token)
 └── tests/                 # Pure bash test suite (53 tests, no framework)
     ├── run-tests.sh       # Test runner entry point
     ├── setup.sh           # Shared test environment setup
     ├── test-throttle.sh   # Throttle logic tests
     ├── test-colors.sh     # Color lookup tests
     ├── test-payload.sh    # Discord payload structure tests
-    └── test-subagent-count.sh  # Subagent tracking tests
+    ├── test-subagent-count.sh  # Subagent tracking tests
+    └── test-notification-cleanup*.sh  # Message cleanup feature tests
 ```
 
 ## Architecture
@@ -69,9 +72,23 @@ bash tests/run-tests.sh
 
 # Run a single test file
 bash tests/test-throttle.sh
+
+# Bulk delete messages from Discord channel (requires bot token)
+DISCORD_BOT_TOKEN=<token> bash scripts/discord-bulk-delete.sh <channel_id>
 ```
 
 No build step, no dependencies beyond `jq` and `curl`.
+
+## Discord Bot (Channel Management)
+
+For bulk operations (clearing channels, etc.), we use a Discord bot separate from the webhook:
+
+- **Bot ID:** 755255283692994591
+- **Token location:** `~/.claude-notify/.env` (DISCORD_BOT_TOKEN)
+- **Permissions needed:** `MANAGE_MESSAGES` (8192) or `ADMINISTRATOR` (8)
+- **Invite URL:** `https://discord.com/oauth2/authorize?client_id=755255283692994591&permissions=8192&scope=bot`
+
+**Note:** Bot token should NEVER be committed to git. Store in `.env` only.
 
 ## GitHub Issues
 
