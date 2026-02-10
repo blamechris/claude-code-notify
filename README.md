@@ -130,7 +130,7 @@ CLAUDE_NOTIFY_SHOW_FULL_PATH=true
 
 **Tool info (permissions only):**
 - Tool name (Bash, Edit, Write, etc.)
-- Command or operation details (truncated to 200 chars for safety)
+- Command or operation details (truncated to 1000 chars for safety)
 
 **Full path:**
 - Complete working directory path instead of basename

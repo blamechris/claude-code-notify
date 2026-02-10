@@ -27,20 +27,41 @@ read_msg_id() { cat "$THROTTLE_DIR/status-msg-${PROJECT}" 2>/dev/null || true; }
 
 # -- Tests --
 
-# 1. PostToolUse with state=idle → should transition to online
+# 1. PostToolUse with state=idle and 0 subagents → should transition to online
 write_state "idle"
 write_msg_id "msg-001"
+rm -f "$THROTTLE_DIR/subagent-count-${PROJECT}"
 CURRENT=$(read_state)
 assert_eq "Pre-condition: state is idle" "idle" "$CURRENT"
-# Simulate: PostToolUse handler checks state and would patch to online
-if [ "$CURRENT" = "idle" ]; then write_state "online"; fi
-assert_eq "idle → online transition" "online" "$(read_state)"
+# Simulate: PostToolUse handler checks state and subagent count
+SUBS=$(cat "$THROTTLE_DIR/subagent-count-${PROJECT}" 2>/dev/null || echo 0)
+if [ "$CURRENT" = "idle" ] && [ "$SUBS" -le 0 ]; then write_state "online"; fi
+assert_eq "idle (0 subs) → online transition" "online" "$(read_state)"
 
-# 2. PostToolUse with state=idle_busy → should transition to online
+# 2. PostToolUse with state=idle_busy and 0 subagents → should transition to online
 write_state "idle_busy"
+echo "0" > "$THROTTLE_DIR/subagent-count-${PROJECT}"
 CURRENT=$(read_state)
-if [ "$CURRENT" = "idle_busy" ]; then write_state "online"; fi
-assert_eq "idle_busy → online transition" "online" "$(read_state)"
+SUBS=$(cat "$THROTTLE_DIR/subagent-count-${PROJECT}" 2>/dev/null || echo 0)
+if [ "$CURRENT" = "idle_busy" ] && [ "$SUBS" -le 0 ]; then write_state "online"; fi
+assert_eq "idle_busy (0 subs) → online transition" "online" "$(read_state)"
+
+# 2b. PostToolUse with state=idle_busy and subagents running → no-op
+write_state "idle_busy"
+echo "3" > "$THROTTLE_DIR/subagent-count-${PROJECT}"
+CURRENT=$(read_state)
+SUBS=$(cat "$THROTTLE_DIR/subagent-count-${PROJECT}" 2>/dev/null || echo 0)
+if [ "$CURRENT" = "idle_busy" ] && [ "$SUBS" -le 0 ]; then write_state "online"; fi
+assert_eq "idle_busy (3 subs) stays idle_busy" "idle_busy" "$(read_state)"
+
+# 2c. PostToolUse with state=idle and subagents running → no-op
+write_state "idle"
+echo "2" > "$THROTTLE_DIR/subagent-count-${PROJECT}"
+CURRENT=$(read_state)
+SUBS=$(cat "$THROTTLE_DIR/subagent-count-${PROJECT}" 2>/dev/null || echo 0)
+if [ "$CURRENT" = "idle" ] && [ "$SUBS" -le 0 ]; then write_state "online"; fi
+assert_eq "idle (2 subs) stays idle" "idle" "$(read_state)"
+rm -f "$THROTTLE_DIR/subagent-count-${PROJECT}"
 
 # 3. PostToolUse with state=permission → should transition to approved
 write_state "permission"
@@ -120,7 +141,7 @@ rm -f "$THROTTLE_DIR/status-state-other-project"
 
 # -- Cleanup and summary --
 
-rm -f "$THROTTLE_DIR/status-msg-${PROJECT}" "$THROTTLE_DIR/status-state-${PROJECT}"
+rm -f "$THROTTLE_DIR/status-msg-${PROJECT}" "$THROTTLE_DIR/status-state-${PROJECT}" "$THROTTLE_DIR/subagent-count-${PROJECT}"
 
 test_summary
 rc=$?

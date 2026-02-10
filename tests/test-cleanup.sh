@@ -103,7 +103,7 @@ load_env_var() {
     eval "[ -z \"\${${var_name}:-}\" ]" || return 0
     local val
     val=$(grep -m1 "^${var_name}=" "$NOTIFY_DIR/.env" 2>/dev/null | cut -d= -f2- || true)
-    [ -n "$val" ] && eval "${var_name}=\$val"
+    [ -n "$val" ] && eval "${var_name}=\$val" || true
 }
 
 # Loads value from .env when not set
