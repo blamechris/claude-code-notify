@@ -118,7 +118,7 @@ for test_file in "$TESTS_DIR"/test-*.sh; do
     echo "DEBUG: test_name=$test_name" >&2
 
     echo "DEBUG: Incrementing counter..." >&2
-    ((total_files++))
+    total_files=$((total_files + 1))
     echo "DEBUG: total_files=$total_files" >&2
 
     printf "[%s]\n" "$test_name"
