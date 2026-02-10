@@ -112,10 +112,24 @@ MESSAGE=$(echo "$INPUT" | jq -r '.message // empty' 2>/dev/null)
 # Customize these for your projects. Color values are decimal integers.
 # Use https://www.spycolor.com to convert hex → decimal.
 get_project_color() {
+    local project="$1"
+    local event_type="${2:-}"
+
+    # Event-type color overrides (takes precedence over project colors)
+    if [ -n "$event_type" ]; then
+        case "$event_type" in
+            permission_prompt)
+                # Orange for permission prompts (urgent, needs attention)
+                echo "${CLAUDE_NOTIFY_PERMISSION_COLOR:-16753920}"
+                return
+                ;;
+        esac
+    fi
+
     # Check for user overrides in config file
     if [ -f "$NOTIFY_DIR/colors.conf" ]; then
         local color
-        color=$(grep -m1 "^${1}=" "$NOTIFY_DIR/colors.conf" 2>/dev/null | cut -d= -f2- || true)
+        color=$(grep -m1 "^${project}=" "$NOTIFY_DIR/colors.conf" 2>/dev/null | cut -d= -f2- || true)
         if [ -n "$color" ] && [[ "$color" =~ ^[0-9]+$ ]]; then
             echo "$color"
             return
@@ -123,7 +137,7 @@ get_project_color() {
     fi
 
     # Built-in defaults
-    case "$1" in
+    case "$project" in
         *)  echo 5793266 ;;  # Default blue #5865F2 (Discord blurple)
     esac
 }
@@ -154,7 +168,7 @@ throttle_check() {
 # -- Build notification --
 
 TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-COLOR=$(get_project_color "$PROJECT_NAME")
+COLOR=$(get_project_color "$PROJECT_NAME" "$NOTIFICATION_TYPE")
 BOT_NAME="${CLAUDE_NOTIFY_BOT_NAME:-Claude Code}"
 
 case "$NOTIFICATION_TYPE" in

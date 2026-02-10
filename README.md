@@ -55,6 +55,7 @@ All config lives in `~/.claude-notify/` (override with `CLAUDE_NOTIFY_DIR` env v
 | `CLAUDE_NOTIFY_BOT_NAME` | `Claude Code` | Webhook bot display name |
 | `CLAUDE_NOTIFY_IDLE_COOLDOWN` | `60` | Seconds between idle notifications (per project) |
 | `CLAUDE_NOTIFY_PERMISSION_COOLDOWN` | `60` | Seconds between permission notifications (per project) |
+| `CLAUDE_NOTIFY_PERMISSION_COLOR` | `16753920` | Color for permission prompts (orange #FFA500) - overrides project colors |
 | `CLAUDE_NOTIFY_CLEANUP_OLD` | `false` | Delete previous message when posting a new one (per project + event type) |
 | `CLAUDE_NOTIFY_ENABLED` | `true` | Set to `false` to disable |
 
