@@ -11,8 +11,15 @@
 
 set -euo pipefail
 
+echo "DEBUG: Starting test runner..." >&2
+echo "DEBUG: Script: $0" >&2
+echo "DEBUG: PWD: $(pwd)" >&2
+
 TESTS_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$TESTS_DIR")"
+
+echo "DEBUG: TESTS_DIR=$TESTS_DIR" >&2
+echo "DEBUG: PROJECT_DIR=$PROJECT_DIR" >&2
 
 # -- Set up isolated test environment --
 
