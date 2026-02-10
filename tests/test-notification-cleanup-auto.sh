@@ -190,6 +190,52 @@ echo ""
 echo -e "${BLUE}→ Discord check: Should see TWO messages for test-proj-d${NC}"
 echo -e "${BLUE}  (One idle, one permission)${NC}"
 
+# TEST 4: Permission messages should NOT be cleaned up (audit trail)
+echo -e "\n${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${BLUE}TEST CATEGORY: Permission Cleanup Exemption${NC}"
+echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
+
+cleanup_test_state
+
+run_test "First permission message should create message ID" '
+    send_notification "/tmp/test-proj-e" "permission_prompt" ",\"message\":\"First permission\"" && \
+    sleep 2 && \
+    check_message_id_exists "test-proj-e" "permission_prompt"
+'
+
+FIRST_PERM_MSG=$(get_message_id "test-proj-e" "permission_prompt")
+echo "  First permission message ID: $FIRST_PERM_MSG"
+
+run_test "Second permission message should create NEW message (not replace)" '
+    sleep 4 && \
+    send_notification "/tmp/test-proj-e" "permission_prompt" ",\"message\":\"Second permission\"" && \
+    sleep 2 && \
+    SECOND_PERM_MSG=$(get_message_id "test-proj-e" "permission_prompt") && \
+    [ -n "$SECOND_PERM_MSG" ] && [ "$SECOND_PERM_MSG" != "$FIRST_PERM_MSG" ]
+'
+
+SECOND_PERM_MSG=$(get_message_id "test-proj-e" "permission_prompt")
+echo "  Second permission message ID: $SECOND_PERM_MSG"
+echo ""
+echo -e "${BLUE}→ Discord check: Should see TWO permission messages for test-proj-e${NC}"
+echo -e "${BLUE}  (Permission messages are NOT cleaned up - they persist as audit history)${NC}"
+
+# Compare: Idle messages DO get cleaned up
+run_test "Idle messages should be replaced (cleanup enabled)" '
+    send_notification "/tmp/test-proj-f" "idle_prompt" && \
+    sleep 2 && \
+    FIRST_IDLE=$(get_message_id "test-proj-f" "idle_prompt") && \
+    sleep 4 && \
+    send_notification "/tmp/test-proj-f" "idle_prompt" && \
+    sleep 2 && \
+    SECOND_IDLE=$(get_message_id "test-proj-f" "idle_prompt") && \
+    [ -n "$FIRST_IDLE" ] && [ -n "$SECOND_IDLE" ] && [ "$FIRST_IDLE" != "$SECOND_IDLE" ]
+'
+
+echo ""
+echo -e "${BLUE}→ Discord check: Should see ONE idle message for test-proj-f${NC}"
+echo -e "${BLUE}  (Idle messages ARE cleaned up - only latest visible)${NC}"
+
 # Cleanup
 echo ""
 echo "Cleaning up test state..."
