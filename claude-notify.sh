@@ -1,12 +1,17 @@
 #!/bin/bash
 # claude-notify.sh — Discord notifications for Claude Code sessions
 #
-# Sends color-coded Discord embeds when Claude Code agents:
-#   - Go idle (waiting for input)
-#   - Need permission approval
-#   - Have subagents running in the background
+# Maintains a single status message per project, updated via PATCH:
+#   SessionStart   → POST  "🟢 Session Online"
+#   Agent idle     → PATCH "🦀 Ready for input"
+#   User types     → PATCH "🟢 Session Online"
+#   Permission     → PATCH "🔐 Needs Approval"
+#   User approves  → PATCH "✅ Permission Approved"
+#   Agent works    → PATCH "🟢 Session Online"
+#   SessionEnd     → PATCH "🔴 Session Offline"
 #
-# Designed as a Claude Code hook (Notification, SubagentStart, SubagentStop).
+# Designed as a Claude Code hook (Notification, SubagentStart/Stop,
+# SessionStart/End, PostToolUse).
 # See install.sh for setup, or README.md for manual configuration.
 #
 # Configuration:
@@ -14,7 +19,7 @@
 #     Set via: environment variable, or ~/.claude-notify/.env file
 #
 #   CLAUDE_NOTIFY_ENABLED — set to "false" to disable (default: true)
-#     Or: rm ~/.claude-notify/.enabled
+#     Or: touch ~/.claude-notify/.disabled
 #
 # Project colors are configured in get_project_color() below.
 
@@ -25,8 +30,6 @@ export PATH="/usr/local/bin:/opt/homebrew/bin:$PATH"
 
 NOTIFY_DIR="${CLAUDE_NOTIFY_DIR:-$HOME/.claude-notify}"
 THROTTLE_DIR="/tmp/claude-notify"
-IDLE_COOLDOWN="${CLAUDE_NOTIFY_IDLE_COOLDOWN:-60}"
-PERMISSION_COOLDOWN="${CLAUDE_NOTIFY_PERMISSION_COOLDOWN:-60}"
 
 mkdir -p "$THROTTLE_DIR"
 
@@ -36,8 +39,6 @@ if [ -f "$NOTIFY_DIR/.env" ]; then
         CLAUDE_NOTIFY_WEBHOOK=$(grep -m1 '^CLAUDE_NOTIFY_WEBHOOK=' "$NOTIFY_DIR/.env" 2>/dev/null | cut -d= -f2- || true)
     [ -z "${CLAUDE_NOTIFY_BOT_NAME:-}" ] && \
         CLAUDE_NOTIFY_BOT_NAME=$(grep -m1 '^CLAUDE_NOTIFY_BOT_NAME=' "$NOTIFY_DIR/.env" 2>/dev/null | cut -d= -f2- || true)
-    [ -z "${CLAUDE_NOTIFY_CLEANUP_OLD:-}" ] && \
-        CLAUDE_NOTIFY_CLEANUP_OLD=$(grep -m1 '^CLAUDE_NOTIFY_CLEANUP_OLD=' "$NOTIFY_DIR/.env" 2>/dev/null | cut -d= -f2- || true)
 
     # Load enhanced context flags
     [ -z "${CLAUDE_NOTIFY_SHOW_SESSION_INFO:-}" ] && \
@@ -167,22 +168,247 @@ build_extra_fields() {
     echo "$extra_fields"
 }
 
-# Delete a Discord message by its ID file path
-# Usage: delete_discord_message "$msg_file"
-# Reads message ID from file, sends DELETE to Discord API, removes the file.
-# No-op if file doesn't exist or webhook ID can't be extracted.
-delete_discord_message() {
-    local msg_file="$1"
-    [ -f "$msg_file" ] || return 0
-    local msg_id
-    msg_id=$(cat "$msg_file" 2>/dev/null || true)
-    [ -z "$msg_id" ] && return 0
-    if WEBHOOK_ID_TOKEN=$(extract_webhook_id_token "$CLAUDE_NOTIFY_WEBHOOK"); then
-        curl -s -o /dev/null -X DELETE \
-            "https://discord.com/api/webhooks/${WEBHOOK_ID_TOKEN}/messages/${msg_id}" \
-            2>/dev/null || true
+# -- Status state helpers --
+
+read_status_state() {
+    local file="$THROTTLE_DIR/status-state-${PROJECT_NAME}"
+    [ -f "$file" ] && cat "$file" 2>/dev/null || true
+}
+
+write_status_state() {
+    echo "$1" > "$THROTTLE_DIR/status-state-${PROJECT_NAME}"
+}
+
+read_status_msg_id() {
+    local file="$THROTTLE_DIR/status-msg-${PROJECT_NAME}"
+    [ -f "$file" ] && cat "$file" 2>/dev/null || true
+}
+
+write_status_msg_id() {
+    echo "$1" > "$THROTTLE_DIR/status-msg-${PROJECT_NAME}"
+}
+
+clear_status_files() {
+    rm -f "$THROTTLE_DIR/status-msg-${PROJECT_NAME}" 2>/dev/null || true
+    rm -f "$THROTTLE_DIR/status-state-${PROJECT_NAME}" 2>/dev/null || true
+    rm -f "$THROTTLE_DIR/last-idle-count-${PROJECT_NAME}" 2>/dev/null || true
+}
+
+# -- Project colors (Discord embed sidebar, decimal RGB) --
+# Customize these for your projects. Color values are decimal integers.
+# Use https://www.spycolor.com to convert hex → decimal.
+get_project_color() {
+    local project="$1"
+
+    # Check for user overrides in config file
+    if [ -f "$NOTIFY_DIR/colors.conf" ]; then
+        local color
+        color=$(grep -m1 "^${project}=" "$NOTIFY_DIR/colors.conf" 2>/dev/null | cut -d= -f2- || true)
+        if [ -n "$color" ]; then
+            if validate_color "$color"; then
+                echo "$color"
+                return
+            else
+                echo "claude-notify: warning: color for project '$project' is out of range '$color' (0-16777215), using default" >&2
+            fi
+        fi
     fi
-    rm -f "$msg_file" 2>/dev/null || true
+
+    # Default: Discord blurple #5865F2
+    echo 5793266
+}
+
+# -- Build status payload --
+# Builds a Discord embed payload for any state in the lifecycle.
+build_status_payload() {
+    local state="$1"
+    local extra="${2:-}"
+    local title color fields
+    local timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    local bot_name="${CLAUDE_NOTIFY_BOT_NAME:-Claude Code}"
+    local extra_fields=$(build_extra_fields)
+
+    case "$state" in
+        online)
+            color="${CLAUDE_NOTIFY_ONLINE_COLOR:-3066993}"
+            if ! validate_color "$color"; then
+                echo "claude-notify: warning: CLAUDE_NOTIFY_ONLINE_COLOR '$color' is out of range (0-16777215), using default" >&2
+                color="3066993"
+            fi
+            title="🟢 ${PROJECT_NAME} — Session Online"
+            local base=$(jq -c -n '[{"name": "Status", "value": "Session started", "inline": false}]')
+            fields=$(jq -c -n --argjson base "$base" --argjson extra "$extra_fields" '$base + $extra')
+            ;;
+        idle)
+            color=$(get_project_color "$PROJECT_NAME")
+            title="🦀 ${PROJECT_NAME} — Ready for input"
+            local base=$(jq -c -n '[{"name": "Status", "value": "Waiting for input", "inline": false}]')
+            fields=$(jq -c -n --argjson base "$base" --argjson extra "$extra_fields" '$base + $extra')
+            ;;
+        idle_busy)
+            color=$(get_project_color "$PROJECT_NAME")
+            title="🔄 ${PROJECT_NAME} — Idle"
+            local base=$(jq -c -n \
+                --arg subs "**${extra}** running" \
+                '[
+                    {"name": "Status", "value": "Main loop idle, waiting for subagents", "inline": false},
+                    {"name": "Subagents", "value": $subs, "inline": true}
+                ]')
+            fields=$(jq -c -n --argjson base "$base" --argjson extra "$extra_fields" '$base + $extra')
+            ;;
+        permission)
+            color="${CLAUDE_NOTIFY_PERMISSION_COLOR:-16753920}"
+            if ! validate_color "$color"; then
+                echo "claude-notify: warning: CLAUDE_NOTIFY_PERMISSION_COLOR '$color' is out of range (0-16777215), using default" >&2
+                color="16753920"
+            fi
+            title="🔐 ${PROJECT_NAME} — Needs Approval"
+            local detail=""
+            [ -n "$extra" ] && detail=$(echo "$extra" | head -c 300)
+            local base=$(jq -c -n \
+                --arg detail "$detail" \
+                'if $detail != "" then
+                    [{"name": "Detail", "value": $detail, "inline": false}]
+                 else [] end')
+            fields=$(jq -c -n --argjson base "$base" --argjson extra "$extra_fields" '$base + $extra')
+            ;;
+        approved)
+            color="${CLAUDE_NOTIFY_APPROVAL_COLOR:-3066993}"
+            if ! validate_color "$color"; then
+                echo "claude-notify: warning: CLAUDE_NOTIFY_APPROVAL_COLOR '$color' is out of range (0-16777215), using default" >&2
+                color="3066993"
+            fi
+            title="✅ ${PROJECT_NAME} — Permission Approved"
+            local base=$(jq -c -n '[{"name": "Status", "value": "Permission granted, tool executed successfully", "inline": false}]')
+            fields=$(jq -c -n --argjson base "$base" --argjson extra "$extra_fields" '$base + $extra')
+            ;;
+        offline)
+            color="${CLAUDE_NOTIFY_OFFLINE_COLOR:-15158332}"
+            if ! validate_color "$color"; then
+                echo "claude-notify: warning: CLAUDE_NOTIFY_OFFLINE_COLOR '$color' is out of range (0-16777215), using default" >&2
+                color="15158332"
+            fi
+            title="🔴 ${PROJECT_NAME} — Session Offline"
+            local base=$(jq -c -n '[{"name": "Status", "value": "Session ended", "inline": false}]')
+            fields=$(jq -c -n --argjson base "$base" --argjson extra "$extra_fields" '$base + $extra')
+            ;;
+    esac
+
+    jq -c -n \
+        --arg username "$bot_name" \
+        --arg title "$title" \
+        --argjson color "$color" \
+        --argjson fields "$fields" \
+        --arg ts "$timestamp" \
+        '{
+            username: $username,
+            embeds: [{
+                title: $title,
+                color: $color,
+                fields: $fields,
+                footer: { text: "Claude Code" },
+                timestamp: $ts
+            }]
+        }'
+}
+
+# -- POST / PATCH helpers --
+
+# POST a new status message, save message ID + state
+post_status_message() {
+    local state="$1"
+    local extra="${2:-}"
+    local payload=$(build_status_payload "$state" "$extra")
+
+    RESPONSE=$(curl -s -w "\n%{http_code}" \
+        -H "Content-Type: application/json" \
+        -d "$payload" \
+        "$CLAUDE_NOTIFY_WEBHOOK?wait=true" 2>/dev/null || true)
+
+    HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+    RESPONSE_BODY=$(echo "$RESPONSE" | sed '$d')
+
+    if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "204" ]; then
+        MESSAGE_ID=$(echo "$RESPONSE_BODY" | jq -r '.id // empty' 2>/dev/null)
+        if [ -n "$MESSAGE_ID" ]; then
+            write_status_msg_id "$MESSAGE_ID"
+            write_status_state "$state"
+        fi
+    fi
+}
+
+# DELETE old message + POST new one (moves to bottom of channel, triggers ping)
+# Used for states the user cares about: idle, permission
+repost_status_message() {
+    local state="$1"
+    local extra="${2:-}"
+    local msg_id=$(read_status_msg_id)
+
+    # Delete old message if it exists
+    if [ -n "$msg_id" ]; then
+        if WEBHOOK_ID_TOKEN=$(extract_webhook_id_token "$CLAUDE_NOTIFY_WEBHOOK"); then
+            curl -s -o /dev/null -X DELETE \
+                "https://discord.com/api/webhooks/${WEBHOOK_ID_TOKEN}/messages/${msg_id}" \
+                2>/dev/null || true
+        fi
+    fi
+
+    # POST new message (saves ID + state)
+    post_status_message "$state" "$extra"
+}
+
+# PATCH an existing status message; self-heals on 404 by falling back to POST
+patch_status_message() {
+    local state="$1"
+    local extra="${2:-}"
+    local msg_id=$(read_status_msg_id)
+
+    # No message to PATCH — self-heal by POSTing
+    if [ -z "$msg_id" ]; then
+        post_status_message "$state" "$extra"
+        return
+    fi
+
+    local payload=$(build_status_payload "$state" "$extra")
+
+    if WEBHOOK_ID_TOKEN=$(extract_webhook_id_token "$CLAUDE_NOTIFY_WEBHOOK"); then
+        for attempt in 1 2 3; do
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+                -X PATCH \
+                -H "Content-Type: application/json" \
+                -d "$payload" \
+                "https://discord.com/api/webhooks/${WEBHOOK_ID_TOKEN}/messages/${msg_id}" 2>/dev/null || true)
+
+            if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "204" ]; then
+                write_status_state "$state"
+                return
+            fi
+
+            # 404 = message deleted externally — self-heal by POSTing
+            if [ "$HTTP_CODE" = "404" ]; then
+                post_status_message "$state" "$extra"
+                return
+            fi
+
+            # Rate limited or server error — retry with backoff
+            if [ "$attempt" -lt 3 ]; then
+                sleep $(( attempt * attempt ))
+            fi
+        done
+    fi
+}
+
+# -- Throttle helper --
+throttle_check() {
+    local lock_file="$THROTTLE_DIR/last-${1}"
+    local cooldown="$2"
+    if [ -f "$lock_file" ]; then
+        local last_sent=$(cat "$lock_file" 2>/dev/null || echo 0)
+        local now=$(date +%s)
+        [ $(( now - last_sent )) -lt "$cooldown" ] && return 1
+    fi
+    date +%s > "$lock_file"
+    return 0
 }
 
 # -- Subagent tracking (no webhook needed) --
@@ -209,242 +435,51 @@ if [ "$HOOK_EVENT" = "SubagentStop" ]; then
     exit 0
 fi
 
-# -- Session lifecycle tracking --
+# -- Session lifecycle --
 
 if [ "$HOOK_EVENT" = "SessionStart" ]; then
-    # Validate webhook URL
     [ -z "${CLAUDE_NOTIFY_WEBHOOK:-}" ] && exit 0
-
-    # Delete previous session message for this project (prevents pileup)
-    SESSION_MSG_FILE="$THROTTLE_DIR/msg-${PROJECT_NAME}-session"
-    delete_discord_message "$SESSION_MSG_FILE"
-
-    # Build "Session Online" notification (green)
-    ONLINE_COLOR="${CLAUDE_NOTIFY_ONLINE_COLOR:-3066993}"  # Green #2ECC71
-    if ! validate_color "$ONLINE_COLOR"; then
-        echo "claude-notify: warning: CLAUDE_NOTIFY_ONLINE_COLOR '$ONLINE_COLOR' is out of range (0-16777215), using default" >&2
-        ONLINE_COLOR="3066993"
-    fi
-    TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-    BOT_NAME="${CLAUDE_NOTIFY_BOT_NAME:-Claude Code}"
-
-    BASE_FIELDS=$(jq -c -n '[{"name": "Status", "value": "Session started", "inline": false}]')
-    EXTRA_FIELDS=$(build_extra_fields)
-    SESSION_FIELDS=$(jq -c -n --argjson base "$BASE_FIELDS" --argjson extra "$EXTRA_FIELDS" '$base + $extra')
-
-    PAYLOAD=$(jq -c -n \
-        --arg username "$BOT_NAME" \
-        --arg title "🟢 ${PROJECT_NAME} — Session Online" \
-        --argjson color "$ONLINE_COLOR" \
-        --argjson fields "$SESSION_FIELDS" \
-        --arg ts "$TIMESTAMP" \
-        '{
-            username: $username,
-            embeds: [{
-                title: $title,
-                color: $color,
-                fields: $fields,
-                footer: { text: "Claude Code" },
-                timestamp: $ts
-            }]
-        }')
-
-    # Send and capture message ID for future cleanup/PATCH
-    RESPONSE=$(curl -s -w "\n%{http_code}" \
-        -H "Content-Type: application/json" \
-        -d "$PAYLOAD" \
-        "$CLAUDE_NOTIFY_WEBHOOK?wait=true" 2>/dev/null || true)
-
-    HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-    RESPONSE_BODY=$(echo "$RESPONSE" | sed '$d')
-
-    if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "204" ]; then
-        MESSAGE_ID=$(echo "$RESPONSE_BODY" | jq -r '.id // empty' 2>/dev/null)
-        if [ -n "$MESSAGE_ID" ]; then
-            echo "$MESSAGE_ID" > "$SESSION_MSG_FILE"
+    # Delete previous session's offline message (if any) before clean slate
+    OLD_MSG_ID=$(read_status_msg_id)
+    if [ -n "$OLD_MSG_ID" ]; then
+        if WEBHOOK_ID_TOKEN=$(extract_webhook_id_token "$CLAUDE_NOTIFY_WEBHOOK"); then
+            curl -s -o /dev/null -X DELETE \
+                "https://discord.com/api/webhooks/${WEBHOOK_ID_TOKEN}/messages/${OLD_MSG_ID}" \
+                2>/dev/null || true
         fi
     fi
-
+    clear_status_files
+    post_status_message "online"
     exit 0
 fi
 
 if [ "$HOOK_EVENT" = "SessionEnd" ]; then
-    # Validate webhook URL
     [ -z "${CLAUDE_NOTIFY_WEBHOOK:-}" ] && exit 0
-
-    SESSION_MSG_FILE="$THROTTLE_DIR/msg-${PROJECT_NAME}-session"
-
-    # Find most recent message ID (check idle, then permission, then session)
-    MESSAGE_ID=""
-    MESSAGE_ID_FILE=""
-
-    # Try idle message first (most common)
-    if [ -f "$THROTTLE_DIR/msg-${PROJECT_NAME}-idle_prompt" ]; then
-        MESSAGE_ID=$(cat "$THROTTLE_DIR/msg-${PROJECT_NAME}-idle_prompt" 2>/dev/null || true)
-        MESSAGE_ID_FILE="$THROTTLE_DIR/msg-${PROJECT_NAME}-idle_prompt"
+    CURRENT_STATE=$(read_status_state)
+    if [ -n "$CURRENT_STATE" ] && [ "$CURRENT_STATE" != "offline" ]; then
+        patch_status_message "offline"
     fi
-
-    # If no idle message, try permission message
-    if [ -z "$MESSAGE_ID" ] && [ -f "$THROTTLE_DIR/msg-${PROJECT_NAME}-permission_prompt" ]; then
-        MESSAGE_ID=$(cat "$THROTTLE_DIR/msg-${PROJECT_NAME}-permission_prompt" 2>/dev/null || true)
-        MESSAGE_ID_FILE="$THROTTLE_DIR/msg-${PROJECT_NAME}-permission_prompt"
-    fi
-
-    # If no idle or permission, fall back to session message
-    if [ -z "$MESSAGE_ID" ] && [ -f "$SESSION_MSG_FILE" ]; then
-        MESSAGE_ID=$(cat "$SESSION_MSG_FILE" 2>/dev/null || true)
-        MESSAGE_ID_FILE="$SESSION_MSG_FILE"
-    fi
-
-    # If we found a message, PATCH it to offline status
-    if [ -n "$MESSAGE_ID" ]; then
-        if WEBHOOK_ID_TOKEN=$(extract_webhook_id_token "$CLAUDE_NOTIFY_WEBHOOK"); then
-            OFFLINE_COLOR="${CLAUDE_NOTIFY_OFFLINE_COLOR:-15158332}"  # Red #E74C3C
-            if ! validate_color "$OFFLINE_COLOR"; then
-                echo "claude-notify: warning: CLAUDE_NOTIFY_OFFLINE_COLOR '$OFFLINE_COLOR' is out of range (0-16777215), using default" >&2
-                OFFLINE_COLOR="15158332"
-            fi
-            TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-            BOT_NAME="${CLAUDE_NOTIFY_BOT_NAME:-Claude Code}"
-
-            BASE_FIELDS=$(jq -c -n '[{"name": "Status", "value": "Session ended", "inline": false}]')
-            EXTRA_FIELDS=$(build_extra_fields)
-            OFFLINE_FIELDS=$(jq -c -n --argjson base "$BASE_FIELDS" --argjson extra "$EXTRA_FIELDS" '$base + $extra')
-
-            PAYLOAD=$(jq -c -n \
-                --arg username "$BOT_NAME" \
-                --arg title "🔴 ${PROJECT_NAME} — Session Offline" \
-                --argjson color "$OFFLINE_COLOR" \
-                --argjson fields "$OFFLINE_FIELDS" \
-                --arg ts "$TIMESTAMP" \
-                '{
-                    username: $username,
-                    embeds: [{
-                        title: $title,
-                        color: $color,
-                        fields: $fields,
-                        footer: { text: "Claude Code" },
-                        timestamp: $ts
-                    }]
-                }')
-
-            # PATCH with retry (3 attempts, exponential backoff)
-            for attempt in 1 2 3; do
-                HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
-                    -X PATCH \
-                    -H "Content-Type: application/json" \
-                    -d "$PAYLOAD" \
-                    "https://discord.com/api/webhooks/${WEBHOOK_ID_TOKEN}/messages/${MESSAGE_ID}")
-
-                if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "204" ]; then
-                    # Success - clean up the message ID file that was PATCHed
-                    rm -f "$MESSAGE_ID_FILE" 2>/dev/null || true
-                    break
-                fi
-
-                # Retry with backoff
-                if [ "$attempt" -lt 3 ]; then
-                    sleep $(( attempt * attempt ))
-                fi
-            done
-        fi
-    fi
-
-    # Always delete session message from Discord on SessionEnd
-    # (prevents stale "Session Online" when idle/permission was PATCHed instead)
-    delete_discord_message "$SESSION_MSG_FILE"
-
+    clear_status_files
     exit 0
 fi
 
-# -- Approval detection (PostToolUse) --
-# When a tool executes successfully after a permission prompt, update the Discord message to green
+# -- Approval detection / state transition (PostToolUse) --
 
 if [ "$HOOK_EVENT" = "PostToolUse" ]; then
-    # Check if webhook is configured
     [ -z "${CLAUDE_NOTIFY_WEBHOOK:-}" ] && exit 0
-
-    # Check if there's a permission message to update
-    # No time limit - some tools can take longer than 5 minutes
-    PERMISSION_MSG_FILE="$THROTTLE_DIR/msg-${PROJECT_NAME}-permission_prompt"
-    PERMISSION_TIME_FILE="$THROTTLE_DIR/last-permission-${PROJECT_NAME}"
-
-    if [ -f "$PERMISSION_MSG_FILE" ]; then
-        MESSAGE_ID=$(cat "$PERMISSION_MSG_FILE" 2>/dev/null)
-
-        if [ -n "$MESSAGE_ID" ]; then
-                # Extract and validate webhook ID and token for PATCH endpoint
-                if WEBHOOK_ID_TOKEN=$(extract_webhook_id_token "$CLAUDE_NOTIFY_WEBHOOK"); then
-                    # Build approval payload (green color)
-                    APPROVAL_COLOR="${CLAUDE_NOTIFY_APPROVAL_COLOR:-3066993}"  # Green #2ECC71
-                    # Validate approval color is in Discord range (0-16777215)
-                    if ! validate_color "$APPROVAL_COLOR"; then
-                        echo "claude-notify: warning: CLAUDE_NOTIFY_APPROVAL_COLOR '$APPROVAL_COLOR' is out of range (0-16777215), using default" >&2
-                        APPROVAL_COLOR="3066993"
-                    fi
-                    TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-                    BOT_NAME="${CLAUDE_NOTIFY_BOT_NAME:-Claude Code}"
-
-                    # Build fields with optional extra context
-                    BASE_FIELDS=$(jq -c -n '[{"name": "Status", "value": "Permission granted, tool executed successfully", "inline": false}]')
-                    EXTRA_FIELDS=$(build_extra_fields)
-                    APPROVAL_FIELDS=$(jq -c -n --argjson base "$BASE_FIELDS" --argjson extra "$EXTRA_FIELDS" '$base + $extra')
-
-                    PAYLOAD=$(jq -c -n \
-                        --arg username "$BOT_NAME" \
-                        --arg title "✅ ${PROJECT_NAME} — Permission Approved" \
-                        --argjson color "$APPROVAL_COLOR" \
-                        --argjson fields "$APPROVAL_FIELDS" \
-                        --arg ts "$TIMESTAMP" \
-                        '{
-                            username: $username,
-                            embeds: [{
-                                title: $title,
-                                color: $color,
-                                fields: $fields,
-                                footer: { text: "Claude Code" },
-                                timestamp: $ts
-                            }]
-                        }')
-
-                    # PATCH with retry (3 attempts, exponential backoff)
-                    for attempt in 1 2 3; do
-                        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
-                            -X PATCH \
-                            -H "Content-Type: application/json" \
-                            -d "$PAYLOAD" \
-                            "https://discord.com/api/webhooks/${WEBHOOK_ID_TOKEN}/messages/${MESSAGE_ID}")
-
-                        if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "204" ]; then
-                            # Success - clean up the message ID file so we don't re-update
-                            rm -f "$PERMISSION_MSG_FILE" 2>/dev/null || true
-                            # Also clear stale idle message (user is active now)
-                            delete_discord_message "$THROTTLE_DIR/msg-${PROJECT_NAME}-idle_prompt"
-                            exit 0
-                        fi
-
-                        # Rate limited or server error - retry with backoff
-                        if [ "$attempt" -lt 3 ]; then
-                            sleep $(( attempt * attempt ))  # 1s, 4s
-                        fi
-                    done
-                fi
-            fi
-        fi
-
-    # Clear stale idle message on any PostToolUse (agent is working, not idle)
-    IDLE_MSG_FILE="$THROTTLE_DIR/msg-${PROJECT_NAME}-idle_prompt"
-    delete_discord_message "$IDLE_MSG_FILE"
-
+    CURRENT_STATE=$(read_status_state)
+    case "$CURRENT_STATE" in
+        permission)     patch_status_message "approved" ;;
+        idle|idle_busy) patch_status_message "online" ;;
+        approved)       patch_status_message "online" ;;
+        *)              exit 0 ;;  # online/offline/empty = no-op
+    esac
     exit 0
 fi
 
-# -- Validate webhook URL (only needed for notification events) --
+# -- Notification handler --
 
-if [ -z "${CLAUDE_NOTIFY_WEBHOOK:-}" ]; then
-    echo "claude-notify: CLAUDE_NOTIFY_WEBHOOK not set. Run install.sh or set the env var." >&2
-    exit 1
-fi
+[ -z "${CLAUDE_NOTIFY_WEBHOOK:-}" ] && { echo "claude-notify: CLAUDE_NOTIFY_WEBHOOK not set. Run install.sh or set the env var." >&2; exit 1; }
 
 # -- Dependencies (curl required for webhook delivery) --
 
@@ -454,79 +489,6 @@ command -v curl &>/dev/null || { echo "claude-notify: curl is required" >&2; exi
 
 NOTIFICATION_TYPE=$(echo "$INPUT" | jq -r '.notification_type // empty' 2>/dev/null)
 MESSAGE=$(echo "$INPUT" | jq -r '.message // empty' 2>/dev/null)
-
-# -- Project colors (Discord embed sidebar, decimal RGB) --
-# Customize these for your projects. Color values are decimal integers.
-# Use https://www.spycolor.com to convert hex → decimal.
-get_project_color() {
-    local project="$1"
-    local event_type="${2:-}"
-
-    # Event-type color overrides (takes precedence over project colors)
-    if [ -n "$event_type" ]; then
-        case "$event_type" in
-            permission_prompt)
-                # Orange for permission prompts (urgent, needs attention)
-                local perm_color="${CLAUDE_NOTIFY_PERMISSION_COLOR:-16753920}"
-                if validate_color "$perm_color"; then
-                    echo "$perm_color"
-                else
-                    echo "claude-notify: warning: CLAUDE_NOTIFY_PERMISSION_COLOR '$perm_color' is out of range (0-16777215), using default" >&2
-                    echo "16753920"
-                fi
-                return
-                ;;
-        esac
-    fi
-
-    # Check for user overrides in config file
-    if [ -f "$NOTIFY_DIR/colors.conf" ]; then
-        local color
-        color=$(grep -m1 "^${project}=" "$NOTIFY_DIR/colors.conf" 2>/dev/null | cut -d= -f2- || true)
-        if [ -n "$color" ]; then
-            if validate_color "$color"; then
-                echo "$color"
-                return
-            else
-                echo "claude-notify: warning: color for project '$project' is out of range '$color' (0-16777215), using default" >&2
-            fi
-        fi
-    fi
-
-    # Built-in defaults
-    case "$project" in
-        *)  echo 5793266 ;;  # Default blue #5865F2 (Discord blurple)
-    esac
-}
-
-# -- Status emoji --
-get_status_emoji() {
-    case "$1" in
-        idle_ready)    echo "🦀" ;;
-        idle_busy)     echo "🔄" ;;
-        permission)    echo "🔐" ;;
-        *)             echo "📝" ;;
-    esac
-}
-
-# -- Throttle helper --
-throttle_check() {
-    local lock_file="$THROTTLE_DIR/last-${1}"
-    local cooldown="$2"
-    if [ -f "$lock_file" ]; then
-        local last_sent=$(cat "$lock_file" 2>/dev/null || echo 0)
-        local now=$(date +%s)
-        [ $(( now - last_sent )) -lt "$cooldown" ] && return 1
-    fi
-    date +%s > "$lock_file"
-    return 0
-}
-
-# -- Build notification --
-
-TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-COLOR=$(get_project_color "$PROJECT_NAME" "$NOTIFICATION_TYPE")
-BOT_NAME="${CLAUDE_NOTIFY_BOT_NAME:-Claude Code}"
 
 case "$NOTIFICATION_TYPE" in
     idle_prompt)
@@ -543,107 +505,25 @@ case "$NOTIFICATION_TYPE" in
             throttle_check "idle-busy-${PROJECT_NAME}" 15 || exit 0
             echo "$SUBAGENTS" > "$LAST_COUNT_FILE"
 
-            EMOJI=$(get_status_emoji "idle_busy")
-            TITLE="${EMOJI} ${PROJECT_NAME} — Idle"
-            BASE_FIELDS=$(jq -c -n \
-                --arg subs "**${SUBAGENTS}** running" \
-                '[
-                    {"name": "Status",    "value": "Main loop idle, waiting for subagents", "inline": false},
-                    {"name": "Subagents", "value": $subs, "inline": true}
-                ]')
-            EXTRA_FIELDS=$(build_extra_fields)
-            FIELDS=$(jq -c -n --argjson base "$BASE_FIELDS" --argjson extra "$EXTRA_FIELDS" '$base + $extra')
+            repost_status_message "idle_busy" "$SUBAGENTS"
         else
             # Clear last count so next subagent session starts fresh
             rm -f "$THROTTLE_DIR/last-idle-count-${PROJECT_NAME}"
-            throttle_check "idle-${PROJECT_NAME}" "$IDLE_COOLDOWN" || exit 0
-
-            EMOJI=$(get_status_emoji "idle_ready")
-            TITLE="${EMOJI} ${PROJECT_NAME} — Ready for input"
-            BASE_FIELDS=$(jq -c -n \
-                '[{"name": "Status", "value": "Waiting for input", "inline": false}]')
-            EXTRA_FIELDS=$(build_extra_fields)
-            FIELDS=$(jq -c -n --argjson base "$BASE_FIELDS" --argjson extra "$EXTRA_FIELDS" '$base + $extra')
+            CURRENT_STATE=$(read_status_state)
+            # Already idle — no-op
+            [ "$CURRENT_STATE" = "idle" ] && exit 0
+            repost_status_message "idle"
         fi
         ;;
 
     permission_prompt)
-        throttle_check "permission-${PROJECT_NAME}" "$PERMISSION_COOLDOWN" || exit 0
-        EMOJI=$(get_status_emoji "permission")
-        TITLE="${EMOJI} ${PROJECT_NAME} — Needs Approval"
         DETAIL=""
         [ -n "$MESSAGE" ] && DETAIL=$(echo "$MESSAGE" | head -c 300)
-        BASE_FIELDS=$(jq -c -n \
-            --arg detail "$DETAIL" \
-            'if $detail != "" then
-                [{"name": "Detail", "value": $detail, "inline": false}]
-             else [] end')
-        EXTRA_FIELDS=$(build_extra_fields)
-        FIELDS=$(jq -c -n --argjson base "$BASE_FIELDS" --argjson extra "$EXTRA_FIELDS" '$base + $extra')
+        repost_status_message "permission" "$DETAIL"
         ;;
 
     *)
-        throttle_check "other-${PROJECT_NAME}" "$IDLE_COOLDOWN" || exit 0
-        EMOJI=$(get_status_emoji "other")
-        TITLE="${EMOJI} ${PROJECT_NAME} — ${NOTIFICATION_TYPE:-notification}"
-        FIELDS="[]"
+        # Skip unknown notification types (don't pollute status message)
+        exit 0
         ;;
 esac
-
-# -- Send Discord webhook --
-
-PAYLOAD=$(jq -c -n \
-    --arg username "$BOT_NAME" \
-    --arg title "$TITLE" \
-    --argjson color "$COLOR" \
-    --argjson fields "$FIELDS" \
-    --arg ts "$TIMESTAMP" \
-    '{
-        username: $username,
-        embeds: [{
-            title: $title,
-            color: $color,
-            fields: $fields,
-            footer: { text: "Claude Code" },
-            timestamp: $ts
-        }]
-    }')
-
-# Delete old message if cleanup is enabled (but NOT for permission messages - keep audit history)
-if [ "${CLAUDE_NOTIFY_CLEANUP_OLD:-false}" = "true" ] && [ "$NOTIFICATION_TYPE" != "permission_prompt" ]; then
-    MESSAGE_ID_FILE="$THROTTLE_DIR/msg-${PROJECT_NAME}-${NOTIFICATION_TYPE}"
-    if [ -f "$MESSAGE_ID_FILE" ]; then
-        OLD_MESSAGE_ID=$(cat "$MESSAGE_ID_FILE" 2>/dev/null || true)
-        if [ -n "$OLD_MESSAGE_ID" ]; then
-            # Extract and validate webhook ID and token from URL for message deletion
-            if WEBHOOK_ID_TOKEN=$(extract_webhook_id_token "$CLAUDE_NOTIFY_WEBHOOK"); then
-                curl -s -o /dev/null -X DELETE \
-                    "https://discord.com/api/webhooks/${WEBHOOK_ID_TOKEN}/messages/${OLD_MESSAGE_ID}" \
-                    2>/dev/null || true
-            fi
-        fi
-    fi
-fi
-
-# Send new message and capture response
-RESPONSE=$(curl -s -w "\n%{http_code}" \
-    -H "Content-Type: application/json" \
-    -d "$PAYLOAD" \
-    "$CLAUDE_NOTIFY_WEBHOOK?wait=true")
-
-HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-RESPONSE_BODY=$(echo "$RESPONSE" | sed '$d')
-
-if [ "$HTTP_CODE" != "204" ] && [ "$HTTP_CODE" != "200" ]; then
-    echo "claude-notify: webhook failed with HTTP $HTTP_CODE" >&2
-    exit 1
-fi
-
-# Save new message ID for future cleanup
-if [ "${CLAUDE_NOTIFY_CLEANUP_OLD:-false}" = "true" ] && [ -n "$RESPONSE_BODY" ]; then
-    MESSAGE_ID=$(echo "$RESPONSE_BODY" | jq -r '.id // empty' 2>/dev/null)
-    if [ -n "$MESSAGE_ID" ]; then
-        MESSAGE_ID_FILE="$THROTTLE_DIR/msg-${PROJECT_NAME}-${NOTIFICATION_TYPE}"
-        echo "$MESSAGE_ID" > "$MESSAGE_ID_FILE"
-    fi
-fi

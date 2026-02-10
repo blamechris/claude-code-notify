@@ -1,11 +1,11 @@
 #!/bin/bash
-# test-cleanup.sh — Tests for CLAUDE_NOTIFY_CLEANUP_OLD message ID handling
+# test-cleanup.sh — Tests for status file isolation (single message per project)
 #
 # Verifies that:
-#   - Message ID files are created in the correct location
-#   - Message IDs are isolated per project
-#   - Message IDs are isolated per event type
-#   - Message ID files persist correctly
+#   - Each project has exactly one status-msg file and one status-state file
+#   - Different projects have separate status files
+#   - Status files overwrite correctly
+#   - Status files are independent from throttle/subagent files
 
 set -uo pipefail
 
@@ -16,70 +16,77 @@ source "$HELPER_FILE"
 
 # -- Tests --
 
-# 1. Message ID file path follows expected pattern
+# 1. Status message file path follows expected pattern (single file per project)
 PROJECT="my-app"
-EVENT_TYPE="idle_prompt"
-EXPECTED_PATH="$THROTTLE_DIR/msg-${PROJECT}-${EVENT_TYPE}"
+EXPECTED_MSG="$THROTTLE_DIR/status-msg-${PROJECT}"
+EXPECTED_STATE="$THROTTLE_DIR/status-state-${PROJECT}"
 
-echo "test-message-id-123" > "$EXPECTED_PATH"
-assert_true "Message ID file created at expected path" \
-    [ -f "$EXPECTED_PATH" ]
+echo "test-message-id-123" > "$EXPECTED_MSG"
+echo "online" > "$EXPECTED_STATE"
+assert_true "Status msg file created at expected path" [ -f "$EXPECTED_MSG" ]
+assert_true "Status state file created at expected path" [ -f "$EXPECTED_STATE" ]
 
-SAVED_ID=$(cat "$EXPECTED_PATH")
+SAVED_ID=$(cat "$EXPECTED_MSG")
 assert_eq "Message ID content is correct" "test-message-id-123" "$SAVED_ID"
+SAVED_STATE=$(cat "$EXPECTED_STATE")
+assert_eq "State content is correct" "online" "$SAVED_STATE"
 
-# 2. Different projects have separate message ID files
-echo "projectA-msg" > "$THROTTLE_DIR/msg-projectA-idle_prompt"
-echo "projectB-msg" > "$THROTTLE_DIR/msg-projectB-idle_prompt"
+# 2. Different projects have separate status files
+echo "projectA-msg" > "$THROTTLE_DIR/status-msg-projectA"
+echo "projectB-msg" > "$THROTTLE_DIR/status-msg-projectB"
 
-ID_A=$(cat "$THROTTLE_DIR/msg-projectA-idle_prompt")
-ID_B=$(cat "$THROTTLE_DIR/msg-projectB-idle_prompt")
+ID_A=$(cat "$THROTTLE_DIR/status-msg-projectA")
+ID_B=$(cat "$THROTTLE_DIR/status-msg-projectB")
 
 assert_eq "Project A has its own message ID" "projectA-msg" "$ID_A"
 assert_eq "Project B has its own message ID" "projectB-msg" "$ID_B"
 
-# 3. Different event types for same project have separate message IDs
-echo "idle-msg-456" > "$THROTTLE_DIR/msg-testproj-idle_prompt"
-echo "perm-msg-789" > "$THROTTLE_DIR/msg-testproj-permission_prompt"
+# 3. Single file per project (no event-type split)
+# There should only be status-msg-PROJECT, NOT status-msg-PROJECT-idle_prompt etc.
+echo "single-msg" > "$THROTTLE_DIR/status-msg-testproj"
+echo "idle" > "$THROTTLE_DIR/status-state-testproj"
+assert_true "Single msg file per project" [ -f "$THROTTLE_DIR/status-msg-testproj" ]
+assert_true "Single state file per project" [ -f "$THROTTLE_DIR/status-state-testproj" ]
+# Update state (simulating idle→permission transition)
+echo "permission" > "$THROTTLE_DIR/status-state-testproj"
+assert_eq "State updated in same file" "permission" "$(cat "$THROTTLE_DIR/status-state-testproj")"
+assert_eq "Msg ID unchanged during state transition" "single-msg" "$(cat "$THROTTLE_DIR/status-msg-testproj")"
 
-IDLE_ID=$(cat "$THROTTLE_DIR/msg-testproj-idle_prompt")
-PERM_ID=$(cat "$THROTTLE_DIR/msg-testproj-permission_prompt")
+# 4. Overwriting status files replaces old content
+echo "old-message-id" > "$THROTTLE_DIR/status-msg-replace-test"
+echo "new-message-id" > "$THROTTLE_DIR/status-msg-replace-test"
 
-assert_eq "Idle message ID is separate" "idle-msg-456" "$IDLE_ID"
-assert_eq "Permission message ID is separate" "perm-msg-789" "$PERM_ID"
-
-# 4. Overwriting message ID file replaces old ID
-echo "old-message-id" > "$THROTTLE_DIR/msg-replace-test-idle_prompt"
-echo "new-message-id" > "$THROTTLE_DIR/msg-replace-test-idle_prompt"
-
-FINAL_ID=$(cat "$THROTTLE_DIR/msg-replace-test-idle_prompt")
+FINAL_ID=$(cat "$THROTTLE_DIR/status-msg-replace-test")
 assert_eq "New message ID replaces old one" "new-message-id" "$FINAL_ID"
 
-# 5. Reading non-existent message ID file returns empty
+# 5. Reading non-existent status files returns empty
+EMPTY_ID=$(cat "$THROTTLE_DIR/status-msg-nonexistent" 2>/dev/null || true)
+assert_eq "Non-existent msg file returns empty" "" "$EMPTY_ID"
 
-EMPTY_ID=$(cat "$THROTTLE_DIR/msg-nonexistent-idle_prompt" 2>/dev/null || true)
-assert_eq "Non-existent file returns empty" "" "$EMPTY_ID"
+EMPTY_STATE=$(cat "$THROTTLE_DIR/status-state-nonexistent" 2>/dev/null || true)
+assert_eq "Non-existent state file returns empty" "" "$EMPTY_STATE"
 
 # 6. Project names are sanitized in file paths (matching main script behavior)
-# Main script uses: tr -cd 'A-Za-z0-9._-'
 UNSAFE_PROJECT="my.app-v2_test"
 SAFE_PROJECT=$(echo "$UNSAFE_PROJECT" | tr -cd 'A-Za-z0-9._-')
 
-echo "safe-msg" > "$THROTTLE_DIR/msg-${SAFE_PROJECT}-idle_prompt"
+echo "safe-msg" > "$THROTTLE_DIR/status-msg-${SAFE_PROJECT}"
 assert_true "Sanitized project name file exists" \
-    [ -f "$THROTTLE_DIR/msg-my.app-v2_test-idle_prompt" ]
+    [ -f "$THROTTLE_DIR/status-msg-my.app-v2_test" ]
 
-# 7. Message ID files are independent from throttle files
-echo "123" > "$THROTTLE_DIR/last-throttle-test"
-echo "msg-abc" > "$THROTTLE_DIR/msg-throttle-test-idle_prompt"
+# 7. Status files are independent from throttle/subagent files
+echo "123" > "$THROTTLE_DIR/last-idle-busy-throttle-test"
+echo "2" > "$THROTTLE_DIR/subagent-count-throttle-test"
+echo "msg-abc" > "$THROTTLE_DIR/status-msg-throttle-test"
+echo "idle" > "$THROTTLE_DIR/status-state-throttle-test"
 
-assert_true "Throttle file exists" [ -f "$THROTTLE_DIR/last-throttle-test" ]
-assert_true "Message ID file exists" [ -f "$THROTTLE_DIR/msg-throttle-test-idle_prompt" ]
+assert_true "Throttle file exists" [ -f "$THROTTLE_DIR/last-idle-busy-throttle-test" ]
+assert_true "Subagent file exists" [ -f "$THROTTLE_DIR/subagent-count-throttle-test" ]
+assert_true "Status msg file exists" [ -f "$THROTTLE_DIR/status-msg-throttle-test" ]
+assert_true "Status state file exists" [ -f "$THROTTLE_DIR/status-state-throttle-test" ]
 
-THROTTLE_VAL=$(cat "$THROTTLE_DIR/last-throttle-test")
-MSG_VAL=$(cat "$THROTTLE_DIR/msg-throttle-test-idle_prompt")
-
-assert_eq "Throttle file has correct value" "123" "$THROTTLE_VAL"
-assert_eq "Message ID file has correct value" "msg-abc" "$MSG_VAL"
+assert_eq "Throttle file has correct value" "123" "$(cat "$THROTTLE_DIR/last-idle-busy-throttle-test")"
+assert_eq "Status msg file has correct value" "msg-abc" "$(cat "$THROTTLE_DIR/status-msg-throttle-test")"
+assert_eq "Status state file has correct value" "idle" "$(cat "$THROTTLE_DIR/status-state-throttle-test")"
 
 test_summary
