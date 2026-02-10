@@ -61,6 +61,8 @@ All config lives in `~/.claude-notify/` (override with `CLAUDE_NOTIFY_DIR` env v
 | `CLAUDE_NOTIFY_PERMISSION_COLOR` | `16753920` | Color for permission prompts (orange #FFA500) - overrides project colors |
 | `CLAUDE_NOTIFY_APPROVAL_COLOR` | `3066993` | Color for approved permissions (green #2ECC71) - auto-updates messages |
 | `CLAUDE_NOTIFY_APPROVAL_TTL` | `1` | Hours to keep approved permissions before cleanup (time-based cleanup script) |
+| `CLAUDE_NOTIFY_ONLINE_COLOR` | `3066993` | Color for session start notifications (green #2ECC71) |
+| `CLAUDE_NOTIFY_OFFLINE_COLOR` | `15158332` | Color for session end (red #E74C3C) - PATCHes last message |
 | `CLAUDE_NOTIFY_CLEANUP_OLD` | `false` | Delete previous message when posting a new one (per project + event type) |
 | `CLAUDE_NOTIFY_ENABLED` | `true` | Set to `false` to disable |
 | `CLAUDE_NOTIFY_SHOW_SESSION_INFO` | `false` | Show session ID and permission mode in notifications |

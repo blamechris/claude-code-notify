@@ -97,6 +97,129 @@ if [ "$HOOK_EVENT" = "SubagentStop" ]; then
     exit 0
 fi
 
+# -- Session lifecycle tracking --
+
+if [ "$HOOK_EVENT" = "SessionStart" ]; then
+    # Validate webhook URL
+    [ -z "${CLAUDE_NOTIFY_WEBHOOK:-}" ] && exit 0
+
+    # Build "Session Online" notification (green)
+    ONLINE_COLOR="${CLAUDE_NOTIFY_ONLINE_COLOR:-3066993}"  # Green #2ECC71
+    if ! validate_color "$ONLINE_COLOR"; then
+        echo "claude-notify: warning: CLAUDE_NOTIFY_ONLINE_COLOR '$ONLINE_COLOR' is out of range (0-16777215), using default" >&2
+        ONLINE_COLOR="3066993"
+    fi
+    TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    BOT_NAME="${CLAUDE_NOTIFY_BOT_NAME:-Claude Code}"
+
+    BASE_FIELDS=$(jq -c -n '[{"name": "Status", "value": "Session started", "inline": false}]')
+    EXTRA_FIELDS=$(build_extra_fields)
+    SESSION_FIELDS=$(jq -c -n --argjson base "$BASE_FIELDS" --argjson extra "$EXTRA_FIELDS" '$base + $extra')
+
+    PAYLOAD=$(jq -c -n \
+        --arg username "$BOT_NAME" \
+        --arg title "🟢 ${PROJECT_NAME} — Session Online" \
+        --argjson color "$ONLINE_COLOR" \
+        --argjson fields "$SESSION_FIELDS" \
+        --arg ts "$TIMESTAMP" \
+        '{
+            username: $username,
+            embeds: [{
+                title: $title,
+                color: $color,
+                fields: $fields,
+                footer: { text: "Claude Code" },
+                timestamp: $ts
+            }]
+        }')
+
+    curl -s -o /dev/null \
+        -H "Content-Type: application/json" \
+        -d "$PAYLOAD" \
+        "$CLAUDE_NOTIFY_WEBHOOK" 2>/dev/null || true
+
+    exit 0
+fi
+
+if [ "$HOOK_EVENT" = "SessionEnd" ]; then
+    # Validate webhook URL
+    [ -z "${CLAUDE_NOTIFY_WEBHOOK:-}" ] && exit 0
+
+    # Find most recent message ID (check idle, then permission)
+    MESSAGE_ID=""
+    MESSAGE_ID_FILE=""
+
+    # Try idle message first (most common)
+    if [ -f "$THROTTLE_DIR/msg-${PROJECT_NAME}-idle_prompt" ]; then
+        MESSAGE_ID=$(cat "$THROTTLE_DIR/msg-${PROJECT_NAME}-idle_prompt" 2>/dev/null || true)
+        MESSAGE_ID_FILE="$THROTTLE_DIR/msg-${PROJECT_NAME}-idle_prompt"
+    fi
+
+    # If no idle message, try permission message
+    if [ -z "$MESSAGE_ID" ] && [ -f "$THROTTLE_DIR/msg-${PROJECT_NAME}-permission_prompt" ]; then
+        MESSAGE_ID=$(cat "$THROTTLE_DIR/msg-${PROJECT_NAME}-permission_prompt" 2>/dev/null || true)
+        MESSAGE_ID_FILE="$THROTTLE_DIR/msg-${PROJECT_NAME}-permission_prompt"
+    fi
+
+    # If we found a message, PATCH it to offline status
+    if [ -n "$MESSAGE_ID" ]; then
+        if WEBHOOK_ID_TOKEN=$(extract_webhook_id_token "$CLAUDE_NOTIFY_WEBHOOK"); then
+            OFFLINE_COLOR="${CLAUDE_NOTIFY_OFFLINE_COLOR:-15158332}"  # Red #E74C3C
+            if ! validate_color "$OFFLINE_COLOR"; then
+                echo "claude-notify: warning: CLAUDE_NOTIFY_OFFLINE_COLOR '$OFFLINE_COLOR' is out of range (0-16777215), using default" >&2
+                OFFLINE_COLOR="15158332"
+            fi
+            TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+            BOT_NAME="${CLAUDE_NOTIFY_BOT_NAME:-Claude Code}"
+
+            BASE_FIELDS=$(jq -c -n '[{"name": "Status", "value": "Session ended", "inline": false}]')
+            EXTRA_FIELDS=$(build_extra_fields)
+            OFFLINE_FIELDS=$(jq -c -n --argjson base "$BASE_FIELDS" --argjson extra "$EXTRA_FIELDS" '$base + $extra')
+
+            PAYLOAD=$(jq -c -n \
+                --arg username "$BOT_NAME" \
+                --arg title "🔴 ${PROJECT_NAME} — Session Offline" \
+                --argjson color "$OFFLINE_COLOR" \
+                --argjson fields "$OFFLINE_FIELDS" \
+                --arg ts "$TIMESTAMP" \
+                '{
+                    username: $username,
+                    embeds: [{
+                        title: $title,
+                        color: $color,
+                        fields: $fields,
+                        footer: { text: "Claude Code" },
+                        timestamp: $ts
+                    }]
+                }')
+
+            # PATCH with retry (3 attempts, exponential backoff)
+            for attempt in 1 2 3; do
+                HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+                    -X PATCH \
+                    -H "Content-Type: application/json" \
+                    -d "$PAYLOAD" \
+                    "https://discord.com/api/webhooks/${WEBHOOK_ID_TOKEN}/messages/${MESSAGE_ID}")
+
+                if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "204" ]; then
+                    # Success - clean up message ID file
+                    if ! rm -f "$MESSAGE_ID_FILE" 2>/dev/null; then
+                        echo "claude-notify: warning: failed to delete message ID file: $MESSAGE_ID_FILE" >&2
+                    fi
+                    exit 0
+                fi
+
+                # Retry with backoff
+                if [ "$attempt" -lt 3 ]; then
+                    sleep $(( attempt * attempt ))
+                fi
+            done
+        fi
+    fi
+
+    exit 0
+fi
+
 # -- Approval detection (PostToolUse) --
 # When a tool executes successfully after a permission prompt, update the Discord message to green
 
