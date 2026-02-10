@@ -1,0 +1,6 @@
+Testing approval detection for Discord notifications.
+
+This file should trigger a permission prompt.
+Once approved, the orange "Needs Approval" notification should update to green "Permission Approved" ✅
+
+Timestamp: 2026-02-10T06:22:00Z
