@@ -11,6 +11,12 @@
 #   NOTIFY_DIR    -- config directory (needed by load_env_var, get_project_color)
 #   SUBAGENT_COUNT_FILE -- path to subagent count file (needed by build_status_payload)
 
+# Guard: must be sourced, not executed directly
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    echo "Error: notify-helpers.sh must be sourced, not executed directly." >&2
+    exit 1
+fi
+
 # Prevent double-sourcing
 [ -n "${_NOTIFY_HELPERS_LOADED:-}" ] && return 0
 _NOTIFY_HELPERS_LOADED=1
