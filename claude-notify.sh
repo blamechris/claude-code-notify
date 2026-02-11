@@ -188,6 +188,18 @@ build_extra_fields() {
     echo "$extra_fields"
 }
 
+# Format seconds into human-readable duration (e.g. "5m 30s", "1h 15m")
+format_duration() {
+    local seconds="$1"
+    if [ "$seconds" -lt 60 ]; then
+        echo "${seconds}s"
+    elif [ "$seconds" -lt 3600 ]; then
+        echo "$(( seconds / 60 ))m $(( seconds % 60 ))s"
+    else
+        echo "$(( seconds / 3600 ))h $(( (seconds % 3600) / 60 ))m"
+    fi
+}
+
 # -- Safe file write helper --
 
 # Write content to a file, logging a warning on failure.
@@ -222,6 +234,43 @@ write_status_msg_id() {
     safe_write_file "$THROTTLE_DIR/status-msg-${PROJECT_NAME}" "$1"
 }
 
+# -- Session metric helpers --
+
+read_session_start() {
+    local file="$THROTTLE_DIR/session-start-${PROJECT_NAME}"
+    [ -f "$file" ] && cat "$file" 2>/dev/null || true
+}
+
+write_session_start() {
+    safe_write_file "$THROTTLE_DIR/session-start-${PROJECT_NAME}" "$1"
+}
+
+read_tool_count() {
+    local file="$THROTTLE_DIR/tool-count-${PROJECT_NAME}"
+    if [ -f "$file" ]; then
+        cat "$file" 2>/dev/null || echo "0"
+    else
+        echo "0"
+    fi
+}
+
+write_tool_count() {
+    safe_write_file "$THROTTLE_DIR/tool-count-${PROJECT_NAME}" "$1"
+}
+
+read_peak_subagents() {
+    local file="$THROTTLE_DIR/peak-subagents-${PROJECT_NAME}"
+    if [ -f "$file" ]; then
+        cat "$file" 2>/dev/null || echo "0"
+    else
+        echo "0"
+    fi
+}
+
+write_peak_subagents() {
+    safe_write_file "$THROTTLE_DIR/peak-subagents-${PROJECT_NAME}" "$1"
+}
+
 # Clear status/throttle/subagent files for a project.
 # Pass "keep_msg_id" to preserve the Discord message ID
 # (SessionEnd needs this so the next SessionStart can delete the offline message).
@@ -234,6 +283,9 @@ clear_status_files() {
     rm -f "$THROTTLE_DIR/last-idle-count-${PROJECT_NAME}" 2>/dev/null || true
     rm -f "$THROTTLE_DIR/subagent-count-${PROJECT_NAME}" 2>/dev/null || true
     rm -f "$THROTTLE_DIR/last-idle-busy-${PROJECT_NAME}" 2>/dev/null || true
+    rm -f "$THROTTLE_DIR/session-start-${PROJECT_NAME}" 2>/dev/null || true
+    rm -f "$THROTTLE_DIR/tool-count-${PROJECT_NAME}" 2>/dev/null || true
+    rm -f "$THROTTLE_DIR/peak-subagents-${PROJECT_NAME}" 2>/dev/null || true
 }
 
 # -- Project colors (Discord embed sidebar, decimal RGB) --
@@ -269,6 +321,16 @@ build_status_payload() {
     local timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
     local bot_name="${CLAUDE_NOTIFY_BOT_NAME:-Claude Code}"
     local extra_fields=$(build_extra_fields)
+
+    local footer_text="$bot_name"
+    local session_start=$(read_session_start)
+    if [ -n "$session_start" ] && [ "$session_start" != "0" ]; then
+        local now=$(date +%s)
+        local elapsed=$(( now - session_start ))
+        if [ "$elapsed" -ge 0 ]; then
+            footer_text="${bot_name} · $(format_duration $elapsed)"
+        fi
+    fi
 
     case "$state" in
         online)
@@ -337,8 +399,17 @@ build_status_payload() {
                 color="15158332"
             fi
             title="🔴 ${PROJECT_NAME} — Session Offline"
-            local base=$(jq -c -n '[{"name": "Status", "value": "Session ended", "inline": false}]')
-            fields=$(jq -c -n --argjson base "$base" --argjson extra "$extra_fields" '$base + $extra')
+            # Build summary fields with session metrics
+            local summary='[]'
+            local tc=$(read_tool_count)
+            if [ "$tc" -gt 0 ] 2>/dev/null; then
+                summary=$(echo "$summary" | jq -c --arg v "$tc" '. + [{"name": "Tools Used", "value": $v, "inline": true}]')
+            fi
+            local peak=$(read_peak_subagents)
+            if [ "$peak" -gt 0 ] 2>/dev/null; then
+                summary=$(echo "$summary" | jq -c --arg v "$peak" '. + [{"name": "Peak Subagents", "value": $v, "inline": true}]')
+            fi
+            fields=$(jq -c -n --argjson summary "$summary" --argjson extra "$extra_fields" '$summary + $extra')
             ;;
         *)
             echo "claude-notify: warning: unknown state '$state', defaulting to online" >&2
@@ -355,6 +426,7 @@ build_status_payload() {
         --arg title "$title" \
         --argjson color "$color" \
         --argjson fields "$fields" \
+        --arg footer "$footer_text" \
         --arg ts "$timestamp" \
         '{
             username: $username,
@@ -362,7 +434,7 @@ build_status_payload() {
                 title: $title,
                 color: $color,
                 fields: $fields,
-                footer: { text: "Claude Code" },
+                footer: { text: $footer },
                 timestamp: $ts
             }]
         }'
@@ -491,6 +563,12 @@ if [ "$HOOK_EVENT" = "SubagentStart" ] || [ "$HOOK_EVENT" = "SubagentStop" ]; th
 
     if [ "$HOOK_EVENT" = "SubagentStart" ]; then
         safe_write_file "$SUBAGENT_COUNT_FILE" "$(( COUNT + 1 ))"
+        # Track peak subagent count (high-water mark)
+        NEW_COUNT=$(( COUNT + 1 ))
+        PEAK=$(read_peak_subagents)
+        if [ "$NEW_COUNT" -gt "$PEAK" ]; then
+            write_peak_subagents "$NEW_COUNT"
+        fi
     else
         NEW_COUNT=$(( COUNT - 1 ))
         [ "$NEW_COUNT" -lt 0 ] && NEW_COUNT=0
@@ -516,6 +594,9 @@ if [ "$HOOK_EVENT" = "SessionStart" ]; then
         fi
     fi
     clear_status_files
+    write_session_start "$(date +%s)"
+    write_tool_count "0"
+    write_peak_subagents "0"
     post_status_message "online"
     exit 0
 fi
@@ -534,6 +615,9 @@ fi
 
 if [ "$HOOK_EVENT" = "PostToolUse" ]; then
     [ -z "${CLAUDE_NOTIFY_WEBHOOK:-}" ] && exit 0
+    # Increment tool counter (file write only, no PATCH)
+    TOOL_COUNT=$(read_tool_count)
+    write_tool_count "$(( TOOL_COUNT + 1 ))"
     CURRENT_STATE=$(read_status_state)
     case "$CURRENT_STATE" in
         permission)     patch_status_message "approved" ;;
