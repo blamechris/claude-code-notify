@@ -559,8 +559,14 @@ patch_status_message() {
 throttle_check() {
     local lock_file="$THROTTLE_DIR/last-${1}"
     local cooldown="$2"
+    # Validate cooldown is numeric; fall back to 30s with a warning
+    if ! [[ "$cooldown" =~ ^[0-9]+$ ]]; then
+        echo "claude-notify: warning: throttle cooldown '$cooldown' is not numeric, using 30s" >&2
+        cooldown=30
+    fi
     if [ -f "$lock_file" ]; then
         local last_sent=$(cat "$lock_file" 2>/dev/null || echo 0)
+        [[ "$last_sent" =~ ^[0-9]+$ ]] || last_sent=0
         local now=$(date +%s)
         [ $(( now - last_sent )) -lt "$cooldown" ] && return 1
     fi
