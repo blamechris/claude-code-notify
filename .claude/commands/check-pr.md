@@ -10,23 +10,41 @@ Address all PR review comments systematically and respond inline.
 
 ### 0. Wait for Automated Reviews
 
-Before processing comments, check if Copilot review has completed:
+Copilot review typically takes **3–5 minutes** after PR creation to even begin. If you run `/check-pr` immediately after creating the PR, the review won't exist yet.
+
+**IMPORTANT:** Do NOT skip this step. If no Copilot review exists and the PR was created recently (within 5 min), you MUST wait — otherwise you'll process zero comments and miss the entire review.
 
 ```bash
 PR_NUM=${1:-$(gh pr view --json number -q .number)}
 REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 
+# Check how old the PR is
+PR_AGE_SECONDS=$(gh pr view ${PR_NUM} --json createdAt \
+  --jq "((now - (.createdAt | fromdateiso8601)))")
+
 # Check Copilot review status
 COPILOT_STATUS=$(gh api repos/${REPO}/pulls/${PR_NUM}/reviews \
-  --jq '[.[] | select(.user.login == "copilot-pull-request-reviewer[bot]")] | if length == 0 then "NOT_REQUESTED" elif (.[0].state == "PENDING") then "IN_PROGRESS" else "COMPLETED" end')
+  --jq '[.[] | select(.user.login == "copilot-pull-request-reviewer[bot]")] | if length == 0 then "NOT_FOUND" elif (.[0].state == "PENDING") then "IN_PROGRESS" else "COMPLETED" end')
 
+# If no review exists yet AND PR is less than 5 min old, wait for it to appear
+if [ "$COPILOT_STATUS" = "NOT_FOUND" ] && [ "${PR_AGE_SECONDS%.*}" -lt 300 ]; then
+  echo "PR is ${PR_AGE_SECONDS%.*}s old. Copilot review not yet started. Waiting (polls every 30s, max 5 min)..."
+  for i in $(seq 1 10); do
+    sleep 30
+    COPILOT_STATUS=$(gh api repos/${REPO}/pulls/${PR_NUM}/reviews \
+      --jq '[.[] | select(.user.login == "copilot-pull-request-reviewer[bot]")] | if length == 0 then "NOT_FOUND" elif (.[0].state == "PENDING") then "IN_PROGRESS" else "COMPLETED" end')
+    [ "$COPILOT_STATUS" != "NOT_FOUND" ] && echo "Copilot review detected (status: $COPILOT_STATUS)" && break
+  done
+fi
+
+# If review is in progress, wait for it to complete
 if [ "$COPILOT_STATUS" = "IN_PROGRESS" ]; then
   echo "Copilot review in progress. Polling every 30s (max 5 min)..."
   for i in $(seq 1 10); do
     sleep 30
-    STATUS=$(gh api repos/${REPO}/pulls/${PR_NUM}/reviews \
+    COPILOT_STATUS=$(gh api repos/${REPO}/pulls/${PR_NUM}/reviews \
       --jq '[.[] | select(.user.login == "copilot-pull-request-reviewer[bot]")] | if (.[0].state == "PENDING") then "IN_PROGRESS" else "COMPLETED" end')
-    [ "$STATUS" != "IN_PROGRESS" ] && break
+    [ "$COPILOT_STATUS" != "IN_PROGRESS" ] && break
   done
 fi
 ```
@@ -130,7 +148,7 @@ ISSUE_URL=$(gh issue create \
   --title "Short descriptive title" \
   --label "enhancement" \
   --label "from-review" \
-  --body "$(cat <<EOF
+  --body "$(cat <<'EOF'
 ## Context
 
 Identified during review of PR #${PR_NUM}.
@@ -225,17 +243,29 @@ EOF
 
 ### 8. Report to User
 
-Output a final summary:
-- Total comments processed
-- Fixes committed (with full commit hashes)
-- False positives dismissed (with reasons)
-- Follow-up issues created (with URLs)
+Output a **summary table** followed by details. The table is the PRIMARY output — it must be scannable at a glance.
+
+```markdown
+| PR | Comments | Changes | Issues |
+|----|----------|---------|--------|
+| #XX | N → Y fixed, Z false pos | brief change 1, brief change 2 | Created: #A, #B. Closed: #C |
+```
+
+**Column guide:**
+- **Comments:** `N → Y fixed` (and `, Z false pos` / `, W deferred` if any)
+- **Changes:** Comma-separated brief descriptions of what changed (2-5 words each). Works for fixes, features, refactors — keep it generic.
+- **Issues:** `Created: #X, #Y` for new follow-up issues. `Closed: #Z` for resolved from-review issues. `—` if none.
+
+Then below the table, list:
+- Full commit hashes for each fix
+- Reasons for any false positives
+- URLs for created/closed issues
 - PR ready for re-review: Yes/No
 
 ## Critical Rules
 
 1. **EVERY comment gets an INLINE reply** -- No silent dismissals. The `gh api .../replies` call is the MOST IMPORTANT output. A summary comment WITHOUT inline replies is a FAILURE.
-2. **Reply IMMEDIATELY after each comment** -- Process one comment at a time: read -> fix/defer -> post inline reply -> next. Do NOT batch all fixes and try to reply later.
+2. **Reply IMMEDIATELY after each comment** -- Process one comment at a time: read → fix/defer → post inline reply → next. Do NOT batch all fixes and try to reply later.
 3. **Verify before summarizing** -- Run the verification step (step 5) and confirm all threads have replies BEFORE posting the summary comment. If any are missing, go back and post them.
 4. **Fix first, defer second** -- Default is to fix the issue
 5. **Be specific** -- ALWAYS show before/after code diffs in fix replies
