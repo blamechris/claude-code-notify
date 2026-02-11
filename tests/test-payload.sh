@@ -53,6 +53,10 @@ safe_write_file() {
 read_session_start() { echo ""; }
 read_tool_count() { echo "0"; }
 read_peak_subagents() { echo "0"; }
+read_last_tool() { echo ""; }
+
+# Per-project subagent count file
+SUBAGENT_COUNT_FILE="$THROTTLE_DIR/subagent-count-${PROJECT_NAME}"
 
 # Stub format_duration
 format_duration() {
@@ -89,8 +93,24 @@ build_status_payload() {
             color="${CLAUDE_NOTIFY_ONLINE_COLOR:-3066993}"
             if ! validate_color "$color"; then color="3066993"; fi
             title="🟢 ${PROJECT_NAME} — Session Online"
-            local base=$(jq -c -n '[{"name": "Status", "value": "Session started", "inline": false}]')
-            fields=$(jq -c -n --argjson base "$base" --argjson extra "$extra_fields" '$base + $extra')
+            local tc=$(read_tool_count)
+            if [ "${CLAUDE_NOTIFY_SHOW_ACTIVITY:-false}" = "true" ] && [ "$tc" -gt 0 ] 2>/dev/null; then
+                local base='[]'
+                base=$(echo "$base" | jq -c --arg v "$tc" '. + [{"name": "Tools Used", "value": $v, "inline": true}]')
+                local last_tool=$(read_last_tool)
+                if [ -n "$last_tool" ]; then
+                    base=$(echo "$base" | jq -c --arg v "$last_tool" '. + [{"name": "Last Tool", "value": $v, "inline": true}]')
+                fi
+                local subs=0
+                [ -f "$SUBAGENT_COUNT_FILE" ] && subs=$(cat "$SUBAGENT_COUNT_FILE" 2>/dev/null || echo 0)
+                if [ "$subs" -gt 0 ]; then
+                    base=$(echo "$base" | jq -c --arg v "$subs" '. + [{"name": "Subagents", "value": $v, "inline": true}]')
+                fi
+                fields=$(jq -c -n --argjson base "$base" --argjson extra "$extra_fields" '$base + $extra')
+            else
+                local base=$(jq -c -n '[{"name": "Status", "value": "Session started", "inline": false}]')
+                fields=$(jq -c -n --argjson base "$base" --argjson extra "$extra_fields" '$base + $extra')
+            fi
             ;;
         idle)
             color=$(get_project_color "$PROJECT_NAME")
