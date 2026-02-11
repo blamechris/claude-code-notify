@@ -19,10 +19,10 @@ Extract the title and any flags from `$ARGUMENTS`. Determine context:
 REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 
 # Check if we're on a PR branch (auto-detect source PR)
-CURRENT_PR=$(gh pr view --json number -q .number 2>/dev/null || echo "")
+SOURCE_PR=$(gh pr view --json number -q .number 2>/dev/null || echo "")
 ```
 
-If `--from-pr` was not specified but we're on a PR branch, use the current PR as the source.
+If `--from-pr` was specified, use that. Otherwise fall back to the auto-detected `SOURCE_PR`.
 
 ### 2. Check for Duplicates
 
