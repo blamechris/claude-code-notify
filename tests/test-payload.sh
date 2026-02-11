@@ -74,13 +74,13 @@ build_status_payload() {
     local bot_name="${CLAUDE_NOTIFY_BOT_NAME:-Claude Code}"
     local extra_fields=$(build_extra_fields)
 
-    local footer_text="Claude Code"
+    local footer_text="$bot_name"
     local session_start=$(read_session_start)
     if [ -n "$session_start" ] && [ "$session_start" != "0" ]; then
         local now=$(date +%s)
         local elapsed=$(( now - session_start ))
         if [ "$elapsed" -ge 0 ]; then
-            footer_text="Claude Code · $(format_duration $elapsed)"
+            footer_text="${bot_name} · $(format_duration $elapsed)"
         fi
     fi
 
