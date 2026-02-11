@@ -15,18 +15,31 @@ set -uo pipefail
 
 source "$HELPER_FILE"
 
+# Stub safe_write_file (used by throttle_check)
+safe_write_file() {
+    local file="$1"
+    local content="$2"
+    printf '%s\n' "$content" > "$file" 2>/dev/null || true
+}
+
 # Extract the throttle_check function from the main script so we can test it
 # in isolation without triggering the script's `cat` (stdin read), `exit`,
 # or webhook logic.
 throttle_check() {
     local lock_file="$THROTTLE_DIR/last-${1}"
     local cooldown="$2"
+    # Validate cooldown is numeric; fall back to 30s with a warning
+    if ! [[ "$cooldown" =~ ^[0-9]+$ ]]; then
+        echo "claude-notify: warning: throttle cooldown '$cooldown' is not numeric, using 30s" >&2
+        cooldown=30
+    fi
     if [ -f "$lock_file" ]; then
         local last_sent=$(cat "$lock_file" 2>/dev/null || echo 0)
+        [[ "$last_sent" =~ ^[0-9]+$ ]] || last_sent=0
         local now=$(date +%s)
         [ $(( now - last_sent )) -lt "$cooldown" ] && return 1
     fi
-    date +%s > "$lock_file"
+    safe_write_file "$lock_file" "$(date +%s)"
     return 0
 }
 
@@ -74,6 +87,22 @@ else
     printf "  FAIL: Lock file contains '%s', expected numeric timestamp\n" "$content"
     ((fail++))
 fi
+
+# 8. Non-numeric cooldown falls back to 30s (still throttles)
+rm -f "$THROTTLE_DIR/last-test-bad-cooldown"
+throttle_check "test-bad-cooldown" "abc" 2>/dev/null
+assert_false "Non-numeric cooldown still throttles (falls back to 30s)" \
+    throttle_check "test-bad-cooldown" "abc" 2>/dev/null
+
+# 9. Non-numeric cooldown emits a warning
+warning=$(throttle_check "test-warn-cooldown" "xyz" 2>&1 >/dev/null || true)
+assert_match "Non-numeric cooldown emits warning" "not numeric" "$warning"
+
+# 10. Corrupt lock file (non-numeric timestamp) doesn't crash
+rm -f "$THROTTLE_DIR/last-test-corrupt"
+printf 'garbage\n' > "$THROTTLE_DIR/last-test-corrupt"
+assert_true "Corrupt lock file doesn't crash throttle_check" \
+    throttle_check "test-corrupt" 120
 
 # -- Cleanup and summary --
 
