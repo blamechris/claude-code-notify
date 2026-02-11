@@ -264,7 +264,8 @@ build_status_payload() {
                     base=$(echo "$base" | jq -c --arg v "$last_tool" '. + [{"name": "Last Tool", "value": $v, "inline": true}]')
                 fi
                 local subs=0
-                [ -f "$SUBAGENT_COUNT_FILE" ] && subs=$(cat "$SUBAGENT_COUNT_FILE" 2>/dev/null || echo 0)
+                local _scf="${SUBAGENT_COUNT_FILE:-}"
+                [ -n "$_scf" ] && [ -f "$_scf" ] && subs=$(cat "$_scf" 2>/dev/null || echo 0)
                 if [ "$subs" -gt 0 ] 2>/dev/null; then
                     base=$(echo "$base" | jq -c --arg v "$subs" '. + [{"name": "Subagents", "value": $v, "inline": true}]')
                 fi
