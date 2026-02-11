@@ -14,34 +14,7 @@ set -uo pipefail
 [ -z "${HELPER_FILE:-}" ] && source "$(dirname "$0")/setup.sh"
 
 source "$HELPER_FILE"
-
-# Stub safe_write_file (used by throttle_check)
-safe_write_file() {
-    local file="$1"
-    local content="$2"
-    printf '%s\n' "$content" > "$file" 2>/dev/null || true
-}
-
-# Extract the throttle_check function from the main script so we can test it
-# in isolation without triggering the script's `cat` (stdin read), `exit`,
-# or webhook logic.
-throttle_check() {
-    local lock_file="$THROTTLE_DIR/last-${1}"
-    local cooldown="$2"
-    # Validate cooldown is numeric; fall back to 30s with a warning
-    if ! [[ "$cooldown" =~ ^[0-9]+$ ]]; then
-        echo "claude-notify: warning: throttle cooldown '$cooldown' is not numeric, using 30s" >&2
-        cooldown=30
-    fi
-    if [ -f "$lock_file" ]; then
-        local last_sent=$(cat "$lock_file" 2>/dev/null || echo 0)
-        [[ "$last_sent" =~ ^[0-9]+$ ]] || last_sent=0
-        local now=$(date +%s)
-        [ $(( now - last_sent )) -lt "$cooldown" ] && return 1
-    fi
-    safe_write_file "$lock_file" "$(date +%s)"
-    return 0
-}
+source "$LIB_FILE"
 
 # -- Tests --
 

@@ -35,7 +35,9 @@
 
 ```
 claude-code-notify/
-├── claude-notify.sh       # Main hook script (stdin JSON -> Discord embed)
+├── claude-notify.sh       # Main hook script (sources lib, handles events)
+├── lib/
+│   └── notify-helpers.sh  # Shared function library (sourced by main + tests)
 ├── install.sh             # Interactive setup (config dir, webhook, hooks registration)
 ├── README.md              # User documentation
 ├── colors.conf.example    # Example per-project color config

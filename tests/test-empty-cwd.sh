@@ -14,27 +14,7 @@ set -uo pipefail
 [ -z "${HELPER_FILE:-}" ] && source "$(dirname "$0")/setup.sh"
 
 source "$HELPER_FILE"
-
-# Helper to extract PROJECT_NAME from the script, given INPUT
-extract_project_name() {
-    local input="$1"
-    # Mimic the exact logic from claude-notify.sh (git root with basename fallback)
-    local cwd=$(echo "$input" | jq -r '.cwd // empty' 2>/dev/null)
-    local project_name="unknown"
-    if [ -n "$cwd" ]; then
-        local git_root
-        git_root=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null || true)
-        if [ -n "$git_root" ]; then
-            project_name=$(basename "$git_root")
-        else
-            project_name=$(basename "$cwd")
-        fi
-    fi
-    project_name=$(echo "$project_name" | tr -cd 'A-Za-z0-9._-')
-    # Ensure PROJECT_NAME is never empty after sanitization (fixes Issue #38)
-    [ -z "$project_name" ] && project_name="unknown"
-    echo "$project_name"
-}
+source "$LIB_FILE"
 
 # -- Tests --
 

@@ -13,23 +13,7 @@ set -uo pipefail
 [ -z "${HELPER_FILE:-}" ] && source "$(dirname "$0")/setup.sh"
 
 source "$HELPER_FILE"
-
-# Replicate get_project_color from the main script, using our test NOTIFY_DIR.
-get_project_color() {
-    if [ -f "$NOTIFY_DIR/colors.conf" ]; then
-        local color
-        color=$(grep -m1 "^${1}=" "$NOTIFY_DIR/colors.conf" 2>/dev/null | cut -d= -f2- || true)
-        if [ -n "$color" ] && [[ "$color" =~ ^[0-9]+$ ]]; then
-            echo "$color"
-            return
-        fi
-    fi
-
-    # Built-in defaults
-    case "$1" in
-        *)  echo 5793266 ;;  # Default blue #5865F2 (Discord blurple)
-    esac
-}
+source "$LIB_FILE"
 
 # -- Tests --
 

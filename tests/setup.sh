@@ -12,6 +12,7 @@ export THROTTLE_DIR="$TEST_TMPDIR/throttle"
 export NOTIFY_DIR="$TEST_TMPDIR/notify-config"
 export CLAUDE_NOTIFY_DIR="$NOTIFY_DIR"
 export MAIN_SCRIPT="$PROJECT_DIR/claude-notify.sh"
+export LIB_FILE="$PROJECT_DIR/lib/notify-helpers.sh"
 
 mkdir -p "$THROTTLE_DIR" "$NOTIFY_DIR"
 STANDALONE=1
