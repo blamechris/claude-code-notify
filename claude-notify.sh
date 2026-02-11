@@ -26,15 +26,15 @@
 set -euo pipefail
 export PATH="/usr/local/bin:/opt/homebrew/bin:$PATH"
 
-# -- Source shared library --
-
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-source "$SCRIPT_DIR/lib/notify-helpers.sh"
-
 # -- Configuration --
 
 NOTIFY_DIR="${CLAUDE_NOTIFY_DIR:-$HOME/.claude-notify}"
 THROTTLE_DIR="/tmp/claude-notify"
+
+# -- Source shared library (after NOTIFY_DIR/THROTTLE_DIR are set) --
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/lib/notify-helpers.sh"
 
 if ! mkdir -p "$THROTTLE_DIR" 2>/dev/null || [ ! -d "$THROTTLE_DIR" ] || [ ! -w "$THROTTLE_DIR" ]; then
     echo "claude-notify: cannot create or write to $THROTTLE_DIR" >&2
