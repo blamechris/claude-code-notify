@@ -55,6 +55,15 @@ read_peak_subagents() {
 }
 write_peak_subagents() { safe_write_file "$THROTTLE_DIR/peak-subagents-${PROJECT_NAME}" "$1"; }
 
+read_last_tool() {
+    local file="$THROTTLE_DIR/last-tool-${PROJECT_NAME}"
+    [ -f "$file" ] && cat "$file" 2>/dev/null || true
+}
+write_last_tool() { safe_write_file "$THROTTLE_DIR/last-tool-${PROJECT_NAME}" "$1"; }
+
+# Per-project subagent count file
+SUBAGENT_COUNT_FILE="$THROTTLE_DIR/subagent-count-${PROJECT_NAME}"
+
 validate_color() {
     local color="$1"
     if [ -n "$color" ] && [[ "$color" =~ ^[0-9]+$ ]] && [ "$color" -ge 0 ] && [ "$color" -le 16777215 ]; then
@@ -129,8 +138,25 @@ build_online_payload() {
 
     local color="3066993"
     local title="🟢 ${PROJECT_NAME} — Session Online"
-    local base=$(jq -c -n '[{"name": "Status", "value": "Session started", "inline": false}]')
-    local fields=$(jq -c -n --argjson base "$base" --argjson extra "$extra_fields" '$base + $extra')
+    local tc=$(read_tool_count)
+    local fields
+    if [ "${CLAUDE_NOTIFY_SHOW_ACTIVITY:-false}" = "true" ] && [ "$tc" -gt 0 ] 2>/dev/null; then
+        local base='[]'
+        base=$(echo "$base" | jq -c --arg v "$tc" '. + [{"name": "Tools Used", "value": $v, "inline": true}]')
+        local last_tool=$(read_last_tool)
+        if [ -n "$last_tool" ]; then
+            base=$(echo "$base" | jq -c --arg v "$last_tool" '. + [{"name": "Last Tool", "value": $v, "inline": true}]')
+        fi
+        local subs=0
+        [ -f "$SUBAGENT_COUNT_FILE" ] && subs=$(cat "$SUBAGENT_COUNT_FILE" 2>/dev/null || echo 0)
+        if [ "$subs" -gt 0 ]; then
+            base=$(echo "$base" | jq -c --arg v "$subs" '. + [{"name": "Subagents", "value": $v, "inline": true}]')
+        fi
+        fields=$(jq -c -n --argjson base "$base" --argjson extra "$extra_fields" '$base + $extra')
+    else
+        local base=$(jq -c -n '[{"name": "Status", "value": "Session started", "inline": false}]')
+        fields=$(jq -c -n --argjson base "$base" --argjson extra "$extra_fields" '$base + $extra')
+    fi
 
     jq -c -n \
         --arg username "Claude Code" \
@@ -163,6 +189,8 @@ clear_status_files() {
     rm -f "$THROTTLE_DIR/session-start-${PROJECT_NAME}" 2>/dev/null || true
     rm -f "$THROTTLE_DIR/tool-count-${PROJECT_NAME}" 2>/dev/null || true
     rm -f "$THROTTLE_DIR/peak-subagents-${PROJECT_NAME}" 2>/dev/null || true
+    rm -f "$THROTTLE_DIR/last-tool-${PROJECT_NAME}" 2>/dev/null || true
+    rm -f "$THROTTLE_DIR/last-activity-${PROJECT_NAME}" 2>/dev/null || true
 }
 
 # -- Clean state before tests --
@@ -356,6 +384,66 @@ assert_eq "peak-subagents cleared with keep_msg_id" "0" "$(read_peak_subagents)"
 # msg_id should be preserved
 msg_id=$(cat "$THROTTLE_DIR/status-msg-${PROJECT_NAME}" 2>/dev/null || echo "")
 assert_eq "msg_id preserved with keep_msg_id" "12345" "$msg_id"
+
+# ============================================================
+# 8. Last tool helpers — write/read round-trip and defaults
+# ============================================================
+
+assert_eq "read_last_tool default is empty" "" "$(read_last_tool)"
+
+write_last_tool "Bash"
+assert_eq "read_last_tool round-trip" "Bash" "$(read_last_tool)"
+
+clear_status_files
+assert_eq "last-tool cleared by clear_status_files" "" "$(read_last_tool)"
+
+# ============================================================
+# 9. Online payload with activity enabled
+# ============================================================
+
+CLAUDE_NOTIFY_SHOW_ACTIVITY=true
+write_tool_count "47"
+write_last_tool "Bash"
+
+payload=$(build_online_payload)
+tc_field=$(echo "$payload" | jq -r '.embeds[0].fields[] | select(.name == "Tools Used") | .value')
+assert_eq "activity online has Tools Used field" "47" "$tc_field"
+
+lt_field=$(echo "$payload" | jq -r '.embeds[0].fields[] | select(.name == "Last Tool") | .value')
+assert_eq "activity online has Last Tool field" "Bash" "$lt_field"
+
+# No Subagents field when count is 0
+sub_count=$(echo "$payload" | jq '[.embeds[0].fields[] | select(.name == "Subagents")] | length')
+assert_eq "no Subagents field when count is 0" "0" "$sub_count"
+
+# With subagents > 0 → has Subagents field
+safe_write_file "$SUBAGENT_COUNT_FILE" "2"
+payload=$(build_online_payload)
+sub_field=$(echo "$payload" | jq -r '.embeds[0].fields[] | select(.name == "Subagents") | .value')
+assert_eq "activity online has Subagents field" "2" "$sub_field"
+
+assert_true "activity online payload is valid JSON" \
+    jq -e . <<< "$payload" > /dev/null 2>&1
+
+clear_status_files
+rm -f "$SUBAGENT_COUNT_FILE" 2>/dev/null || true
+
+# ============================================================
+# 10. Online payload without activity (backward compat)
+# ============================================================
+
+CLAUDE_NOTIFY_SHOW_ACTIVITY=false
+write_tool_count "10"
+payload=$(build_online_payload)
+status_field=$(echo "$payload" | jq -r '.embeds[0].fields[] | select(.name == "Status") | .value')
+assert_eq "activity disabled shows Session started" "Session started" "$status_field"
+
+unset CLAUDE_NOTIFY_SHOW_ACTIVITY
+payload=$(build_online_payload)
+status_field=$(echo "$payload" | jq -r '.embeds[0].fields[] | select(.name == "Status") | .value')
+assert_eq "no SHOW_ACTIVITY shows Session started" "Session started" "$status_field"
+
+clear_status_files
 
 # -- Cleanup and summary --
 

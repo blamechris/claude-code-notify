@@ -54,6 +54,8 @@ if [ -f "$NOTIFY_DIR/.env" ]; then
     load_env_var CLAUDE_NOTIFY_SHOW_SESSION_INFO
     load_env_var CLAUDE_NOTIFY_SHOW_TOOL_INFO
     load_env_var CLAUDE_NOTIFY_SHOW_FULL_PATH
+    load_env_var CLAUDE_NOTIFY_SHOW_ACTIVITY
+    load_env_var CLAUDE_NOTIFY_ACTIVITY_THROTTLE
     load_env_var CLAUDE_NOTIFY_ONLINE_COLOR
     load_env_var CLAUDE_NOTIFY_OFFLINE_COLOR
     load_env_var CLAUDE_NOTIFY_APPROVAL_COLOR
@@ -271,6 +273,15 @@ write_peak_subagents() {
     safe_write_file "$THROTTLE_DIR/peak-subagents-${PROJECT_NAME}" "$1"
 }
 
+read_last_tool() {
+    local file="$THROTTLE_DIR/last-tool-${PROJECT_NAME}"
+    [ -f "$file" ] && cat "$file" 2>/dev/null || true
+}
+
+write_last_tool() {
+    safe_write_file "$THROTTLE_DIR/last-tool-${PROJECT_NAME}" "$1"
+}
+
 # Clear status/throttle/subagent files for a project.
 # Pass "keep_msg_id" to preserve the Discord message ID
 # (SessionEnd needs this so the next SessionStart can delete the offline message).
@@ -286,6 +297,8 @@ clear_status_files() {
     rm -f "$THROTTLE_DIR/session-start-${PROJECT_NAME}" 2>/dev/null || true
     rm -f "$THROTTLE_DIR/tool-count-${PROJECT_NAME}" 2>/dev/null || true
     rm -f "$THROTTLE_DIR/peak-subagents-${PROJECT_NAME}" 2>/dev/null || true
+    rm -f "$THROTTLE_DIR/last-tool-${PROJECT_NAME}" 2>/dev/null || true
+    rm -f "$THROTTLE_DIR/last-activity-${PROJECT_NAME}" 2>/dev/null || true
 }
 
 # -- Project colors (Discord embed sidebar, decimal RGB) --
@@ -340,8 +353,24 @@ build_status_payload() {
                 color="3066993"
             fi
             title="🟢 ${PROJECT_NAME} — Session Online"
-            local base=$(jq -c -n '[{"name": "Status", "value": "Session started", "inline": false}]')
-            fields=$(jq -c -n --argjson base "$base" --argjson extra "$extra_fields" '$base + $extra')
+            local tc=$(read_tool_count)
+            if [ "${CLAUDE_NOTIFY_SHOW_ACTIVITY:-false}" = "true" ] && [ "$tc" -gt 0 ] 2>/dev/null; then
+                local base='[]'
+                base=$(echo "$base" | jq -c --arg v "$tc" '. + [{"name": "Tools Used", "value": $v, "inline": true}]')
+                local last_tool=$(read_last_tool)
+                if [ -n "$last_tool" ]; then
+                    base=$(echo "$base" | jq -c --arg v "$last_tool" '. + [{"name": "Last Tool", "value": $v, "inline": true}]')
+                fi
+                local subs=0
+                [ -f "$SUBAGENT_COUNT_FILE" ] && subs=$(cat "$SUBAGENT_COUNT_FILE" 2>/dev/null || echo 0)
+                if [ "$subs" -gt 0 ]; then
+                    base=$(echo "$base" | jq -c --arg v "$subs" '. + [{"name": "Subagents", "value": $v, "inline": true}]')
+                fi
+                fields=$(jq -c -n --argjson base "$base" --argjson extra "$extra_fields" '$base + $extra')
+            else
+                local base=$(jq -c -n '[{"name": "Status", "value": "Session started", "inline": false}]')
+                fields=$(jq -c -n --argjson base "$base" --argjson extra "$extra_fields" '$base + $extra')
+            fi
             ;;
         idle)
             color=$(get_project_color "$PROJECT_NAME")
@@ -618,6 +647,10 @@ if [ "$HOOK_EVENT" = "PostToolUse" ]; then
     # Increment tool counter (file write only, no PATCH)
     TOOL_COUNT=$(read_tool_count)
     write_tool_count "$(( TOOL_COUNT + 1 ))"
+    # Persist last tool name for activity display
+    if [ -n "$TOOL_NAME" ]; then
+        write_last_tool "$TOOL_NAME"
+    fi
     CURRENT_STATE=$(read_status_state)
     case "$CURRENT_STATE" in
         permission)     patch_status_message "approved" ;;
@@ -631,7 +664,15 @@ if [ "$HOOK_EVENT" = "PostToolUse" ]; then
             patch_status_message "online"
             ;;
         approved)       patch_status_message "online" ;;
-        *)              exit 0 ;;  # online/offline/empty = no-op
+        online)
+            # Heartbeat: throttled PATCH with updated activity metrics
+            if [ "${CLAUDE_NOTIFY_SHOW_ACTIVITY:-false}" = "true" ]; then
+                throttle_check "activity-${PROJECT_NAME}" "${CLAUDE_NOTIFY_ACTIVITY_THROTTLE:-30}" || exit 0
+                patch_status_message "online"
+            fi
+            exit 0
+            ;;
+        *)              exit 0 ;;  # offline/empty = no-op
     esac
     exit 0
 fi
