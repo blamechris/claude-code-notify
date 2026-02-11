@@ -3,10 +3,10 @@
 #
 # Sourced by claude-notify.sh and test files. NOT meant to be executed directly.
 #
-# Required variables (set before sourcing):
+# Required variables (set before calling helpers that need them):
 #   THROTTLE_DIR  -- path to state/throttle directory
 #
-# Optional variables:
+# Optional variables (only required before calling helpers that use them):
 #   PROJECT_NAME  -- sanitized project name (needed by state helpers)
 #   NOTIFY_DIR    -- config directory (needed by load_env_var, get_project_color)
 #   SUBAGENT_COUNT_FILE -- path to subagent count file (needed by build_status_payload)
