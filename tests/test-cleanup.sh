@@ -13,6 +13,7 @@ set -uo pipefail
 [ -z "${HELPER_FILE:-}" ] && source "$(dirname "$0")/setup.sh"
 
 source "$HELPER_FILE"
+source "$LIB_FILE"
 
 # -- Tests --
 
@@ -98,9 +99,6 @@ CLAUDE_NOTIFY_WEBHOOK=https://discord.com/api/webhooks/123/abc
 CLAUDE_NOTIFY_BOT_NAME=Test Bot
 ENVFILE
 
-# Extract function directly from main script to avoid drift
-eval "$(sed -n '/^load_env_var()/,/^}/p' "$MAIN_SCRIPT")"
-
 # Loads value from .env when not set
 unset CLAUDE_NOTIFY_BOT_NAME 2>/dev/null || true
 load_env_var CLAUDE_NOTIFY_BOT_NAME
@@ -117,9 +115,6 @@ load_env_var CLAUDE_NOTIFY_SHOW_SESSION_INFO
 assert_eq "Missing var stays empty" "" "${CLAUDE_NOTIFY_SHOW_SESSION_INFO:-}"
 
 # -- safe_write_file tests --
-
-# Extract function directly from main script to avoid drift
-eval "$(sed -n '/^safe_write_file()/,/^}/p' "$MAIN_SCRIPT")"
 
 # Successful write
 WRITE_TEST_FILE="$THROTTLE_DIR/safe-write-test"

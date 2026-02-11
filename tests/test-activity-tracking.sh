@@ -16,182 +16,15 @@ set -uo pipefail
 [ -z "${HELPER_FILE:-}" ] && source "$(dirname "$0")/setup.sh"
 
 source "$HELPER_FILE"
+source "$LIB_FILE"
 
-# -- Replicate helpers from claude-notify.sh --
+# -- Test setup --
 
 PROJECT_NAME="test-proj-activity"
-
-# Stub safe_write_file
-safe_write_file() {
-    local file="$1"
-    local content="$2"
-    printf '%s\n' "$content" > "$file" 2>/dev/null || true
-}
-
-format_duration() {
-    local seconds="$1"
-    if [ "$seconds" -lt 60 ]; then
-        echo "${seconds}s"
-    elif [ "$seconds" -lt 3600 ]; then
-        echo "$(( seconds / 60 ))m $(( seconds % 60 ))s"
-    else
-        echo "$(( seconds / 3600 ))h $(( (seconds % 3600) / 60 ))m"
-    fi
-}
-
-read_session_start() {
-    local file="$THROTTLE_DIR/session-start-${PROJECT_NAME}"
-    [ -f "$file" ] && cat "$file" 2>/dev/null || true
-}
-write_session_start() { safe_write_file "$THROTTLE_DIR/session-start-${PROJECT_NAME}" "$1"; }
-read_tool_count() {
-    local file="$THROTTLE_DIR/tool-count-${PROJECT_NAME}"
-    if [ -f "$file" ]; then cat "$file" 2>/dev/null || echo "0"; else echo "0"; fi
-}
-write_tool_count() { safe_write_file "$THROTTLE_DIR/tool-count-${PROJECT_NAME}" "$1"; }
-read_peak_subagents() {
-    local file="$THROTTLE_DIR/peak-subagents-${PROJECT_NAME}"
-    if [ -f "$file" ]; then cat "$file" 2>/dev/null || echo "0"; else echo "0"; fi
-}
-write_peak_subagents() { safe_write_file "$THROTTLE_DIR/peak-subagents-${PROJECT_NAME}" "$1"; }
-
-read_last_tool() {
-    local file="$THROTTLE_DIR/last-tool-${PROJECT_NAME}"
-    [ -f "$file" ] && cat "$file" 2>/dev/null || true
-}
-write_last_tool() { safe_write_file "$THROTTLE_DIR/last-tool-${PROJECT_NAME}" "$1"; }
-
-# Per-project subagent count file
 SUBAGENT_COUNT_FILE="$THROTTLE_DIR/subagent-count-${PROJECT_NAME}"
 
-validate_color() {
-    local color="$1"
-    if [ -n "$color" ] && [[ "$color" =~ ^[0-9]+$ ]] && [ "$color" -ge 0 ] && [ "$color" -le 16777215 ]; then
-        return 0
-    fi
-    return 1
-}
-
+# Stub build_extra_fields (no extra context in tests)
 build_extra_fields() { echo "[]"; }
-
-# Stub build_status_payload (offline case only, for summary tests)
-build_offline_payload() {
-    local bot_name="${CLAUDE_NOTIFY_BOT_NAME:-Claude Code}"
-    local extra_fields=$(build_extra_fields)
-
-    local footer_text="$bot_name"
-    local session_start=$(read_session_start)
-    if [ -n "$session_start" ] && [ "$session_start" != "0" ]; then
-        local now=$(date +%s)
-        local elapsed=$(( now - session_start ))
-        if [ "$elapsed" -ge 0 ]; then
-            footer_text="${bot_name} · $(format_duration $elapsed)"
-        fi
-    fi
-
-    local color="${CLAUDE_NOTIFY_OFFLINE_COLOR:-15158332}"
-    local title="🔴 ${PROJECT_NAME} — Session Offline"
-    local summary='[]'
-    local tc=$(read_tool_count)
-    if [ "$tc" -gt 0 ] 2>/dev/null; then
-        summary=$(echo "$summary" | jq -c --arg v "$tc" '. + [{"name": "Tools Used", "value": $v, "inline": true}]')
-    fi
-    local peak=$(read_peak_subagents)
-    if [ "$peak" -gt 0 ] 2>/dev/null; then
-        summary=$(echo "$summary" | jq -c --arg v "$peak" '. + [{"name": "Peak Subagents", "value": $v, "inline": true}]')
-    fi
-    local fields=$(jq -c -n --argjson summary "$summary" --argjson extra "$extra_fields" '$summary + $extra')
-
-    jq -c -n \
-        --arg username "Claude Code" \
-        --arg title "$title" \
-        --argjson color "$color" \
-        --argjson fields "$fields" \
-        --arg footer "$footer_text" \
-        --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-        '{
-            username: $username,
-            embeds: [{
-                title: $title,
-                color: $color,
-                fields: $fields,
-                footer: { text: $footer },
-                timestamp: $ts
-            }]
-        }'
-}
-
-# Stub build_online_payload (for footer tests)
-build_online_payload() {
-    local bot_name="${CLAUDE_NOTIFY_BOT_NAME:-Claude Code}"
-    local extra_fields=$(build_extra_fields)
-
-    local footer_text="$bot_name"
-    local session_start=$(read_session_start)
-    if [ -n "$session_start" ] && [ "$session_start" != "0" ]; then
-        local now=$(date +%s)
-        local elapsed=$(( now - session_start ))
-        if [ "$elapsed" -ge 0 ]; then
-            footer_text="${bot_name} · $(format_duration $elapsed)"
-        fi
-    fi
-
-    local color="3066993"
-    local title="🟢 ${PROJECT_NAME} — Session Online"
-    local tc=$(read_tool_count)
-    local fields
-    if [ "${CLAUDE_NOTIFY_SHOW_ACTIVITY:-false}" = "true" ] && [ "$tc" -gt 0 ] 2>/dev/null; then
-        local base='[]'
-        base=$(echo "$base" | jq -c --arg v "$tc" '. + [{"name": "Tools Used", "value": $v, "inline": true}]')
-        local last_tool=$(read_last_tool)
-        if [ -n "$last_tool" ]; then
-            base=$(echo "$base" | jq -c --arg v "$last_tool" '. + [{"name": "Last Tool", "value": $v, "inline": true}]')
-        fi
-        local subs=0
-        [ -f "$SUBAGENT_COUNT_FILE" ] && subs=$(cat "$SUBAGENT_COUNT_FILE" 2>/dev/null || echo 0)
-        if [ "$subs" -gt 0 ]; then
-            base=$(echo "$base" | jq -c --arg v "$subs" '. + [{"name": "Subagents", "value": $v, "inline": true}]')
-        fi
-        fields=$(jq -c -n --argjson base "$base" --argjson extra "$extra_fields" '$base + $extra')
-    else
-        local base=$(jq -c -n '[{"name": "Status", "value": "Session started", "inline": false}]')
-        fields=$(jq -c -n --argjson base "$base" --argjson extra "$extra_fields" '$base + $extra')
-    fi
-
-    jq -c -n \
-        --arg username "Claude Code" \
-        --arg title "$title" \
-        --argjson color "$color" \
-        --argjson fields "$fields" \
-        --arg footer "$footer_text" \
-        --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-        '{
-            username: $username,
-            embeds: [{
-                title: $title,
-                color: $color,
-                fields: $fields,
-                footer: { text: $footer },
-                timestamp: $ts
-            }]
-        }'
-}
-
-clear_status_files() {
-    local mode="${1:-}"
-    if [ "$mode" != "keep_msg_id" ]; then
-        rm -f "$THROTTLE_DIR/status-msg-${PROJECT_NAME}" 2>/dev/null || true
-    fi
-    rm -f "$THROTTLE_DIR/status-state-${PROJECT_NAME}" 2>/dev/null || true
-    rm -f "$THROTTLE_DIR/last-idle-count-${PROJECT_NAME}" 2>/dev/null || true
-    rm -f "$THROTTLE_DIR/subagent-count-${PROJECT_NAME}" 2>/dev/null || true
-    rm -f "$THROTTLE_DIR/last-idle-busy-${PROJECT_NAME}" 2>/dev/null || true
-    rm -f "$THROTTLE_DIR/session-start-${PROJECT_NAME}" 2>/dev/null || true
-    rm -f "$THROTTLE_DIR/tool-count-${PROJECT_NAME}" 2>/dev/null || true
-    rm -f "$THROTTLE_DIR/peak-subagents-${PROJECT_NAME}" 2>/dev/null || true
-    rm -f "$THROTTLE_DIR/last-tool-${PROJECT_NAME}" 2>/dev/null || true
-    rm -f "$THROTTLE_DIR/last-activity-${PROJECT_NAME}" 2>/dev/null || true
-}
 
 # -- Clean state before tests --
 clear_status_files
@@ -288,13 +121,13 @@ clear_status_files
 # ============================================================
 
 # No session-start file → footer is plain "Claude Code"
-payload=$(build_online_payload)
+payload=$(build_status_payload "online")
 footer=$(echo "$payload" | jq -r '.embeds[0].footer.text')
 assert_eq "footer is 'Claude Code' with no session-start" "Claude Code" "$footer"
 
 # With session-start file → footer contains duration
 write_session_start "$(( $(date +%s) - 125 ))"
-payload=$(build_online_payload)
+payload=$(build_status_payload "online")
 footer=$(echo "$payload" | jq -r '.embeds[0].footer.text')
 assert_match "footer contains 'Claude Code' with session-start" "^Claude Code" "$footer"
 assert_match "footer contains duration" "[0-9]+m" "$footer"
@@ -308,7 +141,7 @@ clear_status_files
 # With tool count > 0 → offline has Tools Used field
 write_tool_count "57"
 write_peak_subagents "0"
-payload=$(build_offline_payload)
+payload=$(build_status_payload "offline")
 tc_field=$(echo "$payload" | jq -r '.embeds[0].fields[] | select(.name == "Tools Used") | .value')
 assert_eq "offline has Tools Used field" "57" "$tc_field"
 tc_inline=$(echo "$payload" | jq -r '.embeds[0].fields[] | select(.name == "Tools Used") | .inline')
@@ -323,7 +156,7 @@ clear_status_files
 # With peak > 0 → offline has Peak Subagents field
 write_tool_count "0"
 write_peak_subagents "4"
-payload=$(build_offline_payload)
+payload=$(build_status_payload "offline")
 peak_field=$(echo "$payload" | jq -r '.embeds[0].fields[] | select(.name == "Peak Subagents") | .value')
 assert_eq "offline has Peak Subagents field" "4" "$peak_field"
 peak_inline=$(echo "$payload" | jq -r '.embeds[0].fields[] | select(.name == "Peak Subagents") | .inline')
@@ -334,7 +167,7 @@ clear_status_files
 # Both metrics present
 write_tool_count "100"
 write_peak_subagents "3"
-payload=$(build_offline_payload)
+payload=$(build_status_payload "offline")
 assert_true "offline payload with metrics is valid JSON" \
     jq -e . <<< "$payload" > /dev/null 2>&1
 field_count=$(echo "$payload" | jq '.embeds[0].fields | length')
@@ -345,7 +178,7 @@ clear_status_files
 # No summary fields when counts are 0
 write_tool_count "0"
 write_peak_subagents "0"
-payload=$(build_offline_payload)
+payload=$(build_status_payload "offline")
 field_count=$(echo "$payload" | jq '.embeds[0].fields | length')
 assert_eq "offline has no fields when counts are 0" "0" "$field_count"
 
@@ -405,7 +238,7 @@ CLAUDE_NOTIFY_SHOW_ACTIVITY=true
 write_tool_count "47"
 write_last_tool "Bash"
 
-payload=$(build_online_payload)
+payload=$(build_status_payload "online")
 tc_field=$(echo "$payload" | jq -r '.embeds[0].fields[] | select(.name == "Tools Used") | .value')
 assert_eq "activity online has Tools Used field" "47" "$tc_field"
 
@@ -418,7 +251,7 @@ assert_eq "no Subagents field when count is 0" "0" "$sub_count"
 
 # With subagents > 0 → has Subagents field
 safe_write_file "$SUBAGENT_COUNT_FILE" "2"
-payload=$(build_online_payload)
+payload=$(build_status_payload "online")
 sub_field=$(echo "$payload" | jq -r '.embeds[0].fields[] | select(.name == "Subagents") | .value')
 assert_eq "activity online has Subagents field" "2" "$sub_field"
 
@@ -434,12 +267,12 @@ rm -f "$SUBAGENT_COUNT_FILE" 2>/dev/null || true
 
 CLAUDE_NOTIFY_SHOW_ACTIVITY=false
 write_tool_count "10"
-payload=$(build_online_payload)
+payload=$(build_status_payload "online")
 status_field=$(echo "$payload" | jq -r '.embeds[0].fields[] | select(.name == "Status") | .value')
 assert_eq "activity disabled shows Session started" "Session started" "$status_field"
 
 unset CLAUDE_NOTIFY_SHOW_ACTIVITY
-payload=$(build_online_payload)
+payload=$(build_status_payload "online")
 status_field=$(echo "$payload" | jq -r '.embeds[0].fields[] | select(.name == "Status") | .value')
 assert_eq "no SHOW_ACTIVITY shows Session started" "Session started" "$status_field"
 

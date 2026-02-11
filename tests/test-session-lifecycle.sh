@@ -13,6 +13,7 @@ set -uo pipefail
 [ -z "${HELPER_FILE:-}" ] && source "$(dirname "$0")/setup.sh"
 
 source "$HELPER_FILE"
+source "$LIB_FILE"
 
 PROJECT="test-proj-session"
 
@@ -75,16 +76,6 @@ rm -f "$THROTTLE_DIR/status-msg-projA" "$THROTTLE_DIR/status-msg-projB" "$THROTT
 
 # 6. clear_status_files removes all tracking files
 PROJECT_NAME="$PROJECT"
-clear_status_files() {
-    local mode="${1:-}"
-    if [ "$mode" != "keep_msg_id" ]; then
-        rm -f "$THROTTLE_DIR/status-msg-${PROJECT_NAME}" 2>/dev/null || true
-    fi
-    rm -f "$THROTTLE_DIR/status-state-${PROJECT_NAME}" 2>/dev/null || true
-    rm -f "$THROTTLE_DIR/last-idle-count-${PROJECT_NAME}" 2>/dev/null || true
-    rm -f "$THROTTLE_DIR/subagent-count-${PROJECT_NAME}" 2>/dev/null || true
-    rm -f "$THROTTLE_DIR/last-idle-busy-${PROJECT_NAME}" 2>/dev/null || true
-}
 echo "msg-200" > "$THROTTLE_DIR/status-msg-${PROJECT}"
 echo "idle_busy" > "$THROTTLE_DIR/status-state-${PROJECT}"
 echo "3" > "$THROTTLE_DIR/last-idle-count-${PROJECT}"
