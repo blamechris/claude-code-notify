@@ -190,7 +190,7 @@ build_extra_fields() {
 
 # Format seconds into human-readable duration (e.g. "5m 30s", "1h 15m")
 format_duration() {
-    local seconds=$1
+    local seconds="$1"
     if [ "$seconds" -lt 60 ]; then
         echo "${seconds}s"
     elif [ "$seconds" -lt 3600 ]; then
@@ -236,12 +236,40 @@ write_status_msg_id() {
 
 # -- Session metric helpers --
 
-read_session_start() { cat "$THROTTLE_DIR/session-start-${PROJECT_NAME}" 2>/dev/null || echo ""; }
-write_session_start() { safe_write_file "$THROTTLE_DIR/session-start-${PROJECT_NAME}" "$1"; }
-read_tool_count() { cat "$THROTTLE_DIR/tool-count-${PROJECT_NAME}" 2>/dev/null || echo "0"; }
-write_tool_count() { safe_write_file "$THROTTLE_DIR/tool-count-${PROJECT_NAME}" "$1"; }
-read_peak_subagents() { cat "$THROTTLE_DIR/peak-subagents-${PROJECT_NAME}" 2>/dev/null || echo "0"; }
-write_peak_subagents() { safe_write_file "$THROTTLE_DIR/peak-subagents-${PROJECT_NAME}" "$1"; }
+read_session_start() {
+    local file="$THROTTLE_DIR/session-start-${PROJECT_NAME}"
+    [ -f "$file" ] && cat "$file" 2>/dev/null || true
+}
+
+write_session_start() {
+    safe_write_file "$THROTTLE_DIR/session-start-${PROJECT_NAME}" "$1"
+}
+
+read_tool_count() {
+    local file="$THROTTLE_DIR/tool-count-${PROJECT_NAME}"
+    if [ -f "$file" ]; then
+        cat "$file" 2>/dev/null || echo "0"
+    else
+        echo "0"
+    fi
+}
+
+write_tool_count() {
+    safe_write_file "$THROTTLE_DIR/tool-count-${PROJECT_NAME}" "$1"
+}
+
+read_peak_subagents() {
+    local file="$THROTTLE_DIR/peak-subagents-${PROJECT_NAME}"
+    if [ -f "$file" ]; then
+        cat "$file" 2>/dev/null || echo "0"
+    else
+        echo "0"
+    fi
+}
+
+write_peak_subagents() {
+    safe_write_file "$THROTTLE_DIR/peak-subagents-${PROJECT_NAME}" "$1"
+}
 
 # Clear status/throttle/subagent files for a project.
 # Pass "keep_msg_id" to preserve the Discord message ID

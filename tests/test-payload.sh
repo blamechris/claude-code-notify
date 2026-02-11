@@ -56,7 +56,7 @@ read_peak_subagents() { echo "0"; }
 
 # Stub format_duration
 format_duration() {
-    local seconds=$1
+    local seconds="$1"
     if [ "$seconds" -lt 60 ]; then
         echo "${seconds}s"
     elif [ "$seconds" -lt 3600 ]; then

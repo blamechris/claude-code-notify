@@ -29,7 +29,7 @@ safe_write_file() {
 }
 
 format_duration() {
-    local seconds=$1
+    local seconds="$1"
     if [ "$seconds" -lt 60 ]; then
         echo "${seconds}s"
     elif [ "$seconds" -lt 3600 ]; then
@@ -39,11 +39,20 @@ format_duration() {
     fi
 }
 
-read_session_start() { cat "$THROTTLE_DIR/session-start-${PROJECT_NAME}" 2>/dev/null || echo ""; }
+read_session_start() {
+    local file="$THROTTLE_DIR/session-start-${PROJECT_NAME}"
+    [ -f "$file" ] && cat "$file" 2>/dev/null || true
+}
 write_session_start() { safe_write_file "$THROTTLE_DIR/session-start-${PROJECT_NAME}" "$1"; }
-read_tool_count() { cat "$THROTTLE_DIR/tool-count-${PROJECT_NAME}" 2>/dev/null || echo "0"; }
+read_tool_count() {
+    local file="$THROTTLE_DIR/tool-count-${PROJECT_NAME}"
+    if [ -f "$file" ]; then cat "$file" 2>/dev/null || echo "0"; else echo "0"; fi
+}
 write_tool_count() { safe_write_file "$THROTTLE_DIR/tool-count-${PROJECT_NAME}" "$1"; }
-read_peak_subagents() { cat "$THROTTLE_DIR/peak-subagents-${PROJECT_NAME}" 2>/dev/null || echo "0"; }
+read_peak_subagents() {
+    local file="$THROTTLE_DIR/peak-subagents-${PROJECT_NAME}"
+    if [ -f "$file" ]; then cat "$file" 2>/dev/null || echo "0"; else echo "0"; fi
+}
 write_peak_subagents() { safe_write_file "$THROTTLE_DIR/peak-subagents-${PROJECT_NAME}" "$1"; }
 
 validate_color() {
