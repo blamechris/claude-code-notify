@@ -363,7 +363,7 @@ build_status_payload() {
                 fi
                 local subs=0
                 [ -f "$SUBAGENT_COUNT_FILE" ] && subs=$(cat "$SUBAGENT_COUNT_FILE" 2>/dev/null || echo 0)
-                if [ "$subs" -gt 0 ]; then
+                if [ "$subs" -gt 0 ] 2>/dev/null; then
                     base=$(echo "$base" | jq -c --arg v "$subs" '. + [{"name": "Subagents", "value": $v, "inline": true}]')
                 fi
                 fields=$(jq -c -n --argjson base "$base" --argjson extra "$extra_fields" '$base + $extra')
