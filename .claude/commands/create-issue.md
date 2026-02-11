@@ -125,8 +125,10 @@ Output a **summary table** — this is the PRIMARY output:
 ```markdown
 | Issue | Title | Labels | Source |
 |-------|-------|--------|--------|
-| #${ISSUE_NUM} | ${ISSUE_TITLE} | from-review, enhancement | PR #${SOURCE_PR} |
+| #${ISSUE_NUM} | ${ISSUE_TITLE} | ${APPLIED_LABELS} | ${SOURCE_OR_DASH} |
 ```
+
+Use actual applied labels and source context. For standalone issues (no PR context), use `—` for Source.
 
 Then below the table:
 - Issue URL (clickable)
