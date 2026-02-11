@@ -41,9 +41,9 @@ echo "$BRANCH" | grep -oE '[0-9]+' | while read num; do
   gh issue view "$num" --json state,title -q 'select(.state == "OPEN") | "#\(.number // empty): \(.title // empty)"' 2>/dev/null
 done
 
-# Source 3: Open from-review issues whose title/body matches changed files
-CHANGED_FILES=$(git diff main --name-only | head -20)
+# Source 3: Open from-review issues — compare against changed files
 gh issue list --label "from-review" --state open --json number,title,body --limit 50
+git diff main --name-only
 ```
 
 **For each candidate issue:** Verify it's open and the PR's changes actually address it. Don't claim to close an issue the commits don't fix.
