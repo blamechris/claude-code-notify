@@ -271,7 +271,7 @@ if [ "$HOOK_EVENT" = "SubagentStart" ] || [ "$HOOK_EVENT" = "SubagentStop" ]; th
     if [ -n "${CLAUDE_NOTIFY_WEBHOOK:-}" ]; then
         CURRENT_STATE=$(read_status_state)
         case "$CURRENT_STATE" in
-            online|approved)
+            online)
                 if throttle_check "subagent-${PROJECT_NAME}" 10; then
                     patch_status_message "$CURRENT_STATE"
                 fi
