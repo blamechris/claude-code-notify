@@ -188,8 +188,8 @@ assert_eq "SubagentStart rapid PATCH is throttled" "false" "$THROTTLE_PASS_2"
 
 # 13f. No PATCH when webhook is unset (mirrors the guard in claude-notify.sh)
 WEBHOOK_SET="true"
-TEST_WEBHOOK=""
-[ -z "$TEST_WEBHOOK" ] && WEBHOOK_SET="false"
+CLAUDE_NOTIFY_WEBHOOK=""
+[ -z "${CLAUDE_NOTIFY_WEBHOOK:-}" ] && WEBHOOK_SET="false"
 assert_eq "SubagentStart no PATCH without webhook" "false" "$WEBHOOK_SET"
 
 # 13g. read_subagent_count helper returns correct values

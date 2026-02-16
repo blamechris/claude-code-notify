@@ -186,9 +186,9 @@ write_last_tool() {
 read_subagent_count() {
     local scf="${SUBAGENT_COUNT_FILE:-}"
     if [ -n "$scf" ] && [ -f "$scf" ]; then
-        cat "$scf" 2>/dev/null || echo 0
+        cat "$scf" 2>/dev/null || echo "0"
     else
-        echo 0
+        echo "0"
     fi
 }
 
