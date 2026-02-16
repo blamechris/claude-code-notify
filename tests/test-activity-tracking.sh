@@ -276,7 +276,26 @@ payload=$(build_status_payload "online")
 status_field=$(echo "$payload" | jq -r '.embeds[0].fields[] | select(.name == "Status") | .value')
 assert_eq "no SHOW_ACTIVITY shows Session started" "Session started" "$status_field"
 
+# ============================================================
+# 11. Online payload without activity shows subagents when > 0
+# ============================================================
+
+CLAUDE_NOTIFY_SHOW_ACTIVITY=false
+safe_write_file "$SUBAGENT_COUNT_FILE" "3"
+payload=$(build_status_payload "online")
+sub_field=$(echo "$payload" | jq -r '.embeds[0].fields[] | select(.name == "Subagents") | .value')
+assert_eq "no-activity online shows Subagents when > 0" "3" "$sub_field"
+status_field=$(echo "$payload" | jq -r '.embeds[0].fields[] | select(.name == "Status") | .value')
+assert_eq "no-activity online still has Status field" "Session started" "$status_field"
+
+# No subagents field when count is 0 (without activity)
+rm -f "$SUBAGENT_COUNT_FILE" 2>/dev/null || true
+payload=$(build_status_payload "online")
+sub_count=$(echo "$payload" | jq '[.embeds[0].fields[] | select(.name == "Subagents")] | length')
+assert_eq "no-activity online no Subagents when 0" "0" "$sub_count"
+
 clear_status_files
+rm -f "$SUBAGENT_COUNT_FILE" 2>/dev/null || true
 
 # -- Cleanup and summary --
 

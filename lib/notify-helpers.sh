@@ -272,6 +272,13 @@ build_status_payload() {
                 fields=$(jq -c -n --argjson base "$base" --argjson extra "$extra_fields" '$base + $extra')
             else
                 local base=$(jq -c -n '[{"name": "Status", "value": "Session started", "inline": false}]')
+                # Show subagent count even without activity tracking
+                local subs=0
+                local _scf="${SUBAGENT_COUNT_FILE:-}"
+                [ -n "$_scf" ] && [ -f "$_scf" ] && subs=$(cat "$_scf" 2>/dev/null || echo 0)
+                if [ "$subs" -gt 0 ] 2>/dev/null; then
+                    base=$(echo "$base" | jq -c --arg v "$subs" '. + [{"name": "Subagents", "value": $v, "inline": true}]')
+                fi
                 fields=$(jq -c -n --argjson base "$base" --argjson extra "$extra_fields" '$base + $extra')
             fi
             ;;
