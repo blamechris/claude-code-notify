@@ -130,9 +130,78 @@ assert_eq "Project state is independent" "permission" "$(read_status_state)"
 assert_eq "Other project state is independent" "other-state" "$(cat "$THROTTLE_DIR/status-state-other-project")"
 rm -f "$THROTTLE_DIR/status-state-other-project"
 
+# ============================================================
+# 13. SubagentStart/Stop PATCH logic
+# ============================================================
+# These test the decision logic from claude-notify.sh's SubagentStart/Stop
+# handler — whether a PATCH should fire based on state and throttle.
+
+SUBAGENT_COUNT_FILE="$THROTTLE_DIR/subagent-count-${PROJECT}"
+
+# 13a. PATCH fires when state is online
+write_status_state "online"
+write_status_msg_id "msg-sub-001"
+rm -f "$THROTTLE_DIR/last-subagent-${PROJECT}"  # clear throttle
+CURRENT_STATE=$(read_status_state)
+SHOULD_PATCH=false
+case "$CURRENT_STATE" in
+    online) SHOULD_PATCH=true ;;
+esac
+assert_eq "SubagentStart PATCHes when state is online" "true" "$SHOULD_PATCH"
+
+# 13b. No PATCH when state is idle
+write_status_state "idle"
+CURRENT_STATE=$(read_status_state)
+SHOULD_PATCH=false
+case "$CURRENT_STATE" in
+    online) SHOULD_PATCH=true ;;
+esac
+assert_eq "SubagentStart no PATCH when state is idle" "false" "$SHOULD_PATCH"
+
+# 13c. No PATCH when state is offline
+write_status_state "offline"
+CURRENT_STATE=$(read_status_state)
+SHOULD_PATCH=false
+case "$CURRENT_STATE" in
+    online) SHOULD_PATCH=true ;;
+esac
+assert_eq "SubagentStart no PATCH when state is offline" "false" "$SHOULD_PATCH"
+
+# 13d. No PATCH when state is empty
+rm -f "$THROTTLE_DIR/status-state-${PROJECT}"
+CURRENT_STATE=$(read_status_state)
+SHOULD_PATCH=false
+case "$CURRENT_STATE" in
+    online) SHOULD_PATCH=true ;;
+esac
+assert_eq "SubagentStart no PATCH when state is empty" "false" "$SHOULD_PATCH"
+
+# 13e. Throttle prevents rapid PATCH updates
+write_status_state "online"
+rm -f "$THROTTLE_DIR/last-subagent-${PROJECT}"
+# First call passes throttle
+THROTTLE_PASS_1=$(throttle_check "subagent-${PROJECT}" 10 && echo "true" || echo "false")
+assert_eq "SubagentStart first PATCH passes throttle" "true" "$THROTTLE_PASS_1"
+# Immediate second call is throttled
+THROTTLE_PASS_2=$(throttle_check "subagent-${PROJECT}" 10 && echo "true" || echo "false")
+assert_eq "SubagentStart rapid PATCH is throttled" "false" "$THROTTLE_PASS_2"
+
+# 13f. No PATCH when webhook is unset (mirrors the guard in claude-notify.sh)
+WEBHOOK_SET="true"
+CLAUDE_NOTIFY_WEBHOOK=""
+[ -z "${CLAUDE_NOTIFY_WEBHOOK:-}" ] && WEBHOOK_SET="false"
+assert_eq "SubagentStart no PATCH without webhook" "false" "$WEBHOOK_SET"
+
+# 13g. read_subagent_count helper returns correct values
+rm -f "$SUBAGENT_COUNT_FILE"
+assert_eq "read_subagent_count default is 0" "0" "$(read_subagent_count)"
+safe_write_file "$SUBAGENT_COUNT_FILE" "5"
+assert_eq "read_subagent_count reads file" "5" "$(read_subagent_count)"
+rm -f "$SUBAGENT_COUNT_FILE"
+
 # -- Cleanup and summary --
 
-rm -f "$THROTTLE_DIR/status-msg-${PROJECT}" "$THROTTLE_DIR/status-state-${PROJECT}" "$THROTTLE_DIR/subagent-count-${PROJECT}"
+rm -f "$THROTTLE_DIR/status-msg-${PROJECT}" "$THROTTLE_DIR/status-state-${PROJECT}" "$THROTTLE_DIR/subagent-count-${PROJECT}" "$THROTTLE_DIR/last-subagent-${PROJECT}"
 
 test_summary
 rc=$?

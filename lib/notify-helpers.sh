@@ -183,6 +183,15 @@ write_last_tool() {
     safe_write_file "$THROTTLE_DIR/last-tool-${PROJECT_NAME}" "$1"
 }
 
+read_subagent_count() {
+    local scf="${SUBAGENT_COUNT_FILE:-}"
+    if [ -n "$scf" ] && [ -f "$scf" ]; then
+        cat "$scf" 2>/dev/null || echo "0"
+    else
+        echo "0"
+    fi
+}
+
 # Clear status/throttle/subagent files for a project.
 # Pass "keep_msg_id" to preserve the Discord message ID
 # (SessionEnd needs this so the next SessionStart can delete the offline message).
@@ -263,9 +272,7 @@ build_status_payload() {
                 if [ -n "$last_tool" ]; then
                     base=$(echo "$base" | jq -c --arg v "$last_tool" '. + [{"name": "Last Tool", "value": $v, "inline": true}]')
                 fi
-                local subs=0
-                local _scf="${SUBAGENT_COUNT_FILE:-}"
-                [ -n "$_scf" ] && [ -f "$_scf" ] && subs=$(cat "$_scf" 2>/dev/null || echo 0)
+                local subs=$(read_subagent_count)
                 if [ "$subs" -gt 0 ] 2>/dev/null; then
                     base=$(echo "$base" | jq -c --arg v "$subs" '. + [{"name": "Subagents", "value": $v, "inline": true}]')
                 fi
@@ -273,9 +280,7 @@ build_status_payload() {
             else
                 local base=$(jq -c -n '[{"name": "Status", "value": "Session started", "inline": false}]')
                 # Show subagent count even without activity tracking
-                local subs=0
-                local _scf="${SUBAGENT_COUNT_FILE:-}"
-                [ -n "$_scf" ] && [ -f "$_scf" ] && subs=$(cat "$_scf" 2>/dev/null || echo 0)
+                local subs=$(read_subagent_count)
                 if [ "$subs" -gt 0 ] 2>/dev/null; then
                     base=$(echo "$base" | jq -c --arg v "$subs" '. + [{"name": "Subagents", "value": $v, "inline": true}]')
                 fi
