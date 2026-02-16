@@ -268,8 +268,10 @@ if [ "$HOOK_EVENT" = "SubagentStart" ] || [ "$HOOK_EVENT" = "SubagentStop" ]; th
     trap - EXIT
 
     # PATCH the Discord embed with updated subagent count (throttled)
-    if should_patch_subagent_update; then
-        patch_status_message "$(read_status_state)"
+    # Read state once to avoid TOCTOU race between decision and PATCH
+    STATUS_STATE="$(read_status_state)"
+    if should_patch_subagent_update "$STATUS_STATE"; then
+        patch_status_message "$STATUS_STATE"
     fi
     exit 0
 fi
