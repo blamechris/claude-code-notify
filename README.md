@@ -64,6 +64,8 @@ All config lives in `~/.claude-notify/` (override with `CLAUDE_NOTIFY_DIR` env v
 | `CLAUDE_NOTIFY_SHOW_SESSION_INFO` | `false` | Show session ID and permission mode in notifications |
 | `CLAUDE_NOTIFY_SHOW_TOOL_INFO` | `false` | Show tool name and command details (for permissions) |
 | `CLAUDE_NOTIFY_SHOW_FULL_PATH` | `false` | Show full working directory path instead of project name |
+| `CLAUDE_NOTIFY_SHOW_ACTIVITY` | `false` | Show activity metrics (Tools Used, Last Tool) in online embed. Enables periodic heartbeat PATCHes |
+| `CLAUDE_NOTIFY_ACTIVITY_THROTTLE` | `30` | Seconds between heartbeat updates when activity tracking is enabled |
 | `DISCORD_BOT_TOKEN` | *(optional)* | Bot token for bulk operations (channel cleanup, not needed for hooks) |
 | `DISCORD_DELETE_DELAY` | `0.5` | Seconds between deletions in bulk delete script (rate limiting) |
 
@@ -120,6 +122,12 @@ CLAUDE_NOTIFY_SHOW_TOOL_INFO=true
 
 # Show full working directory path instead of just project name
 CLAUDE_NOTIFY_SHOW_FULL_PATH=true
+
+# Show activity metrics (tool count, last tool) in online embed
+CLAUDE_NOTIFY_SHOW_ACTIVITY=true
+
+# Seconds between heartbeat updates (default 30)
+# CLAUDE_NOTIFY_ACTIVITY_THROTTLE=30
 ```
 
 **What you'll see with these enabled:**
@@ -134,6 +142,11 @@ CLAUDE_NOTIFY_SHOW_FULL_PATH=true
 
 **Full path:**
 - Complete working directory path instead of basename
+
+**Activity tracking:**
+- Tools Used — total tool calls in the session
+- Last Tool — most recent tool name
+- Subagent count (always shown when > 0, even without activity tracking)
 
 These flags default to `false` to keep notifications clean. Enable them when you need more diagnostic information or are managing multiple sessions.
 
@@ -263,6 +276,14 @@ Hook types used:
 - **`PostToolUse`** — detects approvals and user activity (PATCH, quiet)
 - **`SessionEnd`** — marks offline (PATCH), cleans up state files
 - **`SubagentStart`** / **`SubagentStop`** — tracks per-project subagent counts
+
+### Subagent tracking
+
+Subagent counts always display in the online embed when greater than zero — no configuration flags needed. When a `SubagentStart` or `SubagentStop` event fires, the script increments/decrements the count and PATCHes the embed (throttled to one update per 10 seconds to avoid Discord rate limits). The count resets automatically at session end.
+
+### Activity tracking
+
+When `CLAUDE_NOTIFY_SHOW_ACTIVITY=true`, the online embed also shows **Tools Used** (total count) and **Last Tool** (most recent tool name). Each `PostToolUse` event triggers a throttled heartbeat PATCH (default 30s interval, configurable via `CLAUDE_NOTIFY_ACTIVITY_THROTTLE`).
 
 State is stored in `/tmp/claude-notify/` (`status-msg-PROJECT`, `status-state-PROJECT`) and resets on reboot.
 
