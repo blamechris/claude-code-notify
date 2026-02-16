@@ -131,10 +131,9 @@ assert_eq "Other project state is independent" "other-state" "$(cat "$THROTTLE_D
 rm -f "$THROTTLE_DIR/status-state-other-project"
 
 # ============================================================
-# 13. SubagentStart/Stop PATCH logic
+# 13. SubagentStart/Stop PATCH logic (via should_patch_subagent_update)
 # ============================================================
-# These test the decision logic from claude-notify.sh's SubagentStart/Stop
-# handler — whether a PATCH should fire based on state and throttle.
+# Tests the real should_patch_subagent_update() helper from notify-helpers.sh.
 
 SUBAGENT_COUNT_FILE="$THROTTLE_DIR/subagent-count-${PROJECT}"
 
@@ -142,62 +141,53 @@ SUBAGENT_COUNT_FILE="$THROTTLE_DIR/subagent-count-${PROJECT}"
 write_status_state "online"
 write_status_msg_id "msg-sub-001"
 rm -f "$THROTTLE_DIR/last-subagent-${PROJECT}"  # clear throttle
-CURRENT_STATE=$(read_status_state)
-SHOULD_PATCH=false
-case "$CURRENT_STATE" in
-    online) SHOULD_PATCH=true ;;
-esac
-assert_eq "SubagentStart PATCHes when state is online" "true" "$SHOULD_PATCH"
+CLAUDE_NOTIFY_WEBHOOK="https://discord.com/api/webhooks/123/fake-token"
+RESULT=$(should_patch_subagent_update && echo "true" || echo "false")
+assert_eq "SubagentStart PATCHes when state is online" "true" "$RESULT"
 
 # 13b. No PATCH when state is idle
 write_status_state "idle"
-CURRENT_STATE=$(read_status_state)
-SHOULD_PATCH=false
-case "$CURRENT_STATE" in
-    online) SHOULD_PATCH=true ;;
-esac
-assert_eq "SubagentStart no PATCH when state is idle" "false" "$SHOULD_PATCH"
+rm -f "$THROTTLE_DIR/last-subagent-${PROJECT}"
+RESULT=$(should_patch_subagent_update && echo "true" || echo "false")
+assert_eq "SubagentStart no PATCH when state is idle" "false" "$RESULT"
 
 # 13c. No PATCH when state is offline
 write_status_state "offline"
-CURRENT_STATE=$(read_status_state)
-SHOULD_PATCH=false
-case "$CURRENT_STATE" in
-    online) SHOULD_PATCH=true ;;
-esac
-assert_eq "SubagentStart no PATCH when state is offline" "false" "$SHOULD_PATCH"
+RESULT=$(should_patch_subagent_update && echo "true" || echo "false")
+assert_eq "SubagentStart no PATCH when state is offline" "false" "$RESULT"
 
 # 13d. No PATCH when state is empty
 rm -f "$THROTTLE_DIR/status-state-${PROJECT}"
-CURRENT_STATE=$(read_status_state)
-SHOULD_PATCH=false
-case "$CURRENT_STATE" in
-    online) SHOULD_PATCH=true ;;
-esac
-assert_eq "SubagentStart no PATCH when state is empty" "false" "$SHOULD_PATCH"
+RESULT=$(should_patch_subagent_update && echo "true" || echo "false")
+assert_eq "SubagentStart no PATCH when state is empty" "false" "$RESULT"
 
 # 13e. Throttle prevents rapid PATCH updates
 write_status_state "online"
 rm -f "$THROTTLE_DIR/last-subagent-${PROJECT}"
-# First call passes throttle
-THROTTLE_PASS_1=$(throttle_check "subagent-${PROJECT}" 10 && echo "true" || echo "false")
-assert_eq "SubagentStart first PATCH passes throttle" "true" "$THROTTLE_PASS_1"
+# First call passes (clears throttle above)
+RESULT_1=$(should_patch_subagent_update && echo "true" || echo "false")
+assert_eq "SubagentStart first PATCH passes throttle" "true" "$RESULT_1"
 # Immediate second call is throttled
-THROTTLE_PASS_2=$(throttle_check "subagent-${PROJECT}" 10 && echo "true" || echo "false")
-assert_eq "SubagentStart rapid PATCH is throttled" "false" "$THROTTLE_PASS_2"
+RESULT_2=$(should_patch_subagent_update && echo "true" || echo "false")
+assert_eq "SubagentStart rapid PATCH is throttled" "false" "$RESULT_2"
 
-# 13f. No PATCH when webhook is unset (mirrors the guard in claude-notify.sh)
-WEBHOOK_SET="true"
+# 13f. No PATCH when webhook is unset
 CLAUDE_NOTIFY_WEBHOOK=""
-[ -z "${CLAUDE_NOTIFY_WEBHOOK:-}" ] && WEBHOOK_SET="false"
-assert_eq "SubagentStart no PATCH without webhook" "false" "$WEBHOOK_SET"
+rm -f "$THROTTLE_DIR/last-subagent-${PROJECT}"
+write_status_state "online"
+RESULT=$(should_patch_subagent_update && echo "true" || echo "false")
+assert_eq "SubagentStart no PATCH without webhook" "false" "$RESULT"
 
 # 13g. read_subagent_count helper returns correct values
+CLAUDE_NOTIFY_WEBHOOK="https://discord.com/api/webhooks/123/fake-token"
 rm -f "$SUBAGENT_COUNT_FILE"
 assert_eq "read_subagent_count default is 0" "0" "$(read_subagent_count)"
 safe_write_file "$SUBAGENT_COUNT_FILE" "5"
 assert_eq "read_subagent_count reads file" "5" "$(read_subagent_count)"
 rm -f "$SUBAGENT_COUNT_FILE"
+
+# Clean up webhook var so it doesn't leak
+unset CLAUDE_NOTIFY_WEBHOOK
 
 # -- Cleanup and summary --
 

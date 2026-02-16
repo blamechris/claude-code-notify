@@ -268,15 +268,10 @@ if [ "$HOOK_EVENT" = "SubagentStart" ] || [ "$HOOK_EVENT" = "SubagentStop" ]; th
     trap - EXIT
 
     # PATCH the Discord embed with updated subagent count (throttled)
-    if [ -n "${CLAUDE_NOTIFY_WEBHOOK:-}" ]; then
-        CURRENT_STATE=$(read_status_state)
-        case "$CURRENT_STATE" in
-            online)
-                if throttle_check "subagent-${PROJECT_NAME}" 10; then
-                    patch_status_message "$CURRENT_STATE"
-                fi
-                ;;
-        esac
+    # Read state once to avoid TOCTOU race between decision and PATCH
+    STATUS_STATE="$(read_status_state)"
+    if should_patch_subagent_update "$STATUS_STATE"; then
+        patch_status_message "$STATUS_STATE"
     fi
     exit 0
 fi
@@ -330,8 +325,7 @@ if [ "$HOOK_EVENT" = "PostToolUse" ]; then
             # Only transition to online if no subagents are running.
             # PostToolUse fires for subagent tool use too — don't let
             # subagent activity revert idle/idle_busy back to online.
-            SUBS=0
-            [ -f "$SUBAGENT_COUNT_FILE" ] && SUBS=$(cat "$SUBAGENT_COUNT_FILE" 2>/dev/null || echo 0)
+            SUBS=$(read_subagent_count)
             [ "$SUBS" -gt 0 ] && exit 0
             patch_status_message "online"
             ;;
@@ -363,8 +357,7 @@ MESSAGE=$(echo "$INPUT" | jq -r '.message // empty' 2>/dev/null)
 
 case "$NOTIFICATION_TYPE" in
     idle_prompt)
-        SUBAGENTS=0
-        [ -f "$SUBAGENT_COUNT_FILE" ] && SUBAGENTS=$(cat "$SUBAGENT_COUNT_FILE" 2>/dev/null || echo 0)
+        SUBAGENTS=$(read_subagent_count)
 
         if [ "$SUBAGENTS" -gt 0 ]; then
             # Dedup: suppress if subagent count hasn't changed since last notification
