@@ -66,6 +66,8 @@ All config lives in `~/.claude-notify/` (override with `CLAUDE_NOTIFY_DIR` env v
 | `CLAUDE_NOTIFY_SHOW_FULL_PATH` | `false` | Show full working directory path instead of project name |
 | `CLAUDE_NOTIFY_SHOW_ACTIVITY` | `false` | Show activity metrics (Tools Used, Last Tool) in online embed. Enables periodic heartbeat PATCHes |
 | `CLAUDE_NOTIFY_ACTIVITY_THROTTLE` | `30` | Seconds between heartbeat updates when activity tracking is enabled |
+| `CLAUDE_NOTIFY_HEARTBEAT_INTERVAL` | `300` | Seconds between background heartbeat PATCHes (keeps elapsed time fresh). Set to `0` to disable. Non-zero values below 10 are ignored (default used) |
+| `CLAUDE_NOTIFY_STALE_THRESHOLD` | `18000` | Seconds before a session in the same state gets a "(stale?)" title suffix (default 5 hours) |
 | `DISCORD_BOT_TOKEN` | *(optional)* | Bot token for bulk operations (channel cleanup, not needed for hooks) |
 | `DISCORD_DELETE_DELAY` | `0.5` | Seconds between deletions in bulk delete script (rate limiting) |
 
@@ -147,6 +149,7 @@ CLAUDE_NOTIFY_SHOW_ACTIVITY=true
 - Tools Used — total tool calls in the session
 - Last Tool — most recent tool name
 - Subagent count (always shown when > 0, even without activity tracking)
+- BG Bashes — background bash commands launched (always shown when > 0, even without activity tracking)
 
 These flags default to `false` to keep notifications clean. Enable them when you need more diagnostic information or are managing multiple sessions.
 
@@ -256,6 +259,11 @@ This removes hooks from `settings.json` but leaves your config in `~/.claude-not
 - Subagent counts are tracked in `/tmp/claude-notify/` and reset on reboot
 - To manually reset: `rm /tmp/claude-notify/subagent-count-*`
 
+**Stale indicator showing incorrectly**
+- The "(stale?)" suffix appears when a session stays in the same state for >5 hours (configurable via `CLAUDE_NOTIFY_STALE_THRESHOLD`)
+- To reset: the indicator clears automatically when the state changes
+- To adjust the threshold: set `CLAUDE_NOTIFY_STALE_THRESHOLD` in `~/.claude-notify/.env` (seconds)
+
 ## How it works
 
 Claude Code's [hooks system](https://docs.anthropic.com/en/docs/claude-code) fires events as JSON on stdin. This script maintains a **single Discord message per project** through a state machine. Important states (idle, permission) DELETE the old message and POST a new one so they appear at the bottom of the channel and trigger Discord pings. Background transitions (online, approved, offline) use PATCH to update quietly in place.
@@ -273,13 +281,35 @@ SessionEnd     → PATCH               "🔴 Session Offline"
 Hook types used:
 - **`SessionStart`** — deletes previous offline message, creates new status message (DELETE + POST)
 - **`Notification`** (`idle_prompt`, `permission_prompt`) — repost for visibility (DELETE + POST)
-- **`PostToolUse`** — detects approvals and user activity (PATCH, quiet)
+- **`PostToolUse`** — detects approvals, user activity, and background bash commands (PATCH, quiet)
 - **`SessionEnd`** — marks offline (PATCH), cleans up state files
 - **`SubagentStart`** / **`SubagentStop`** — tracks per-project subagent counts
 
 ### Subagent tracking
 
 Subagent counts always display in the online embed when greater than zero — no configuration flags needed. When a `SubagentStart` or `SubagentStop` event fires, the script increments/decrements the count and PATCHes the embed (throttled to one update per 10 seconds to avoid Discord rate limits). The count resets automatically at session end.
+
+### Background bash tracking
+
+Background bash commands (launched with `run_in_background: true`) are counted automatically. The count is a monotonic counter — it increments when a background bash is launched but cannot decrement since no hook fires when a background bash completes. Think of it as "background bashes launched this session."
+
+The count displays as:
+- **Online embed** — "BG Bashes" field (when > 0)
+- **Idle embed** — included in status text (when > 0)
+- **Idle with subagents** — "BG Bashes" field alongside subagent count (when > 0)
+- **Offline embed** — "Peak BG Bashes" field showing the session maximum
+
+The counter resets on session start.
+
+### Heartbeat & stale detection
+
+A background process (`lib/heartbeat.sh`) spawns on `SessionStart` and is killed on `SessionEnd`. It PATCHes the embed at a regular interval (default every 5 minutes) to keep the footer's elapsed time accurate between hook events.
+
+**Configuration:**
+- `CLAUDE_NOTIFY_HEARTBEAT_INTERVAL` — seconds between PATCHes (default `300`, set to `0` to disable; non-zero values below `10` are ignored and the default is used)
+- `CLAUDE_NOTIFY_STALE_THRESHOLD` — seconds before a session in the same state gets a "(stale?)" title suffix (default `18000` = 5 hours)
+
+Stale detection flags sessions that may have been abandoned — if the state hasn't changed for longer than the threshold, the embed title gets a "(stale?)" suffix. The suffix clears automatically when the state changes.
 
 ### Activity tracking
 
