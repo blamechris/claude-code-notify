@@ -270,8 +270,20 @@ if [ "$HOOK_EVENT" = "SubagentStart" ] || [ "$HOOK_EVENT" = "SubagentStop" ]; th
     # PATCH the Discord embed with updated subagent count (throttled)
     # Read state once to avoid TOCTOU race between decision and PATCH
     STATUS_STATE="$(read_status_state)"
-    if should_patch_subagent_update "$STATUS_STATE"; then
-        patch_status_message "$STATUS_STATE"
+    if should_patch_subagent_update "$STATUS_STATE" "$NEW_COUNT"; then
+        # idle_busy + all agents done → repost as plain idle (triggers ping)
+        if [ "$STATUS_STATE" = "idle_busy" ] && [ "$NEW_COUNT" = "0" ]; then
+            if [ -n "${CLAUDE_NOTIFY_WEBHOOK:-}" ]; then
+                repost_status_message "idle"
+            fi
+        else
+            # idle_busy needs subagent count passed as extra for the embed
+            if [ "$STATUS_STATE" = "idle_busy" ]; then
+                patch_status_message "$STATUS_STATE" "$NEW_COUNT"
+            else
+                patch_status_message "$STATUS_STATE"
+            fi
+        fi
     fi
     exit 0
 fi

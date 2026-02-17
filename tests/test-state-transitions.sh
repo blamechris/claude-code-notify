@@ -186,6 +186,40 @@ safe_write_file "$SUBAGENT_COUNT_FILE" "5"
 assert_eq "read_subagent_count reads file" "5" "$(read_subagent_count)"
 rm -f "$SUBAGENT_COUNT_FILE"
 
+# 13h. should_patch_subagent_update fires for idle_busy state
+rm -f "$THROTTLE_DIR/last-subagent-${PROJECT}"
+write_status_state "idle_busy"
+RESULT=$(should_patch_subagent_update "idle_busy" "2" && echo "true" || echo "false")
+assert_eq "SubagentStart PATCH in idle_busy" "true" "$RESULT"
+
+# 13i. should_patch_subagent_update fires for approved state
+rm -f "$THROTTLE_DIR/last-subagent-${PROJECT}"
+write_status_state "approved"
+RESULT=$(should_patch_subagent_update "approved" "1" && echo "true" || echo "false")
+assert_eq "SubagentStart PATCH in approved" "true" "$RESULT"
+
+# 13j. count=0 bypasses throttle (even when within 10s cooldown)
+write_status_state "online"
+# Fire once to set the throttle timestamp
+should_patch_subagent_update "online" "1" || true
+# Immediately check with count=0 — should bypass throttle
+RESULT=$(should_patch_subagent_update "online" "0" && echo "true" || echo "false")
+assert_eq "SubagentStop count=0 bypasses throttle" "true" "$RESULT"
+
+# 13k. idle_busy + count=0 bypasses throttle (repost path)
+write_status_state "idle_busy"
+# Fire once to set the throttle timestamp
+should_patch_subagent_update "idle_busy" "1" || true
+# Immediately check with count=0 — should bypass
+RESULT=$(should_patch_subagent_update "idle_busy" "0" && echo "true" || echo "false")
+assert_eq "idle_busy count=0 bypasses throttle" "true" "$RESULT"
+
+# 13l. should_patch_subagent_update does NOT fire for idle state
+rm -f "$THROTTLE_DIR/last-subagent-${PROJECT}"
+write_status_state "idle"
+RESULT=$(should_patch_subagent_update "idle" "1" && echo "true" || echo "false")
+assert_eq "No PATCH for idle state" "false" "$RESULT"
+
 # Clean up webhook var so it doesn't leak
 unset CLAUDE_NOTIFY_WEBHOOK
 
