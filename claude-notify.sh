@@ -273,9 +273,7 @@ if [ "$HOOK_EVENT" = "SubagentStart" ] || [ "$HOOK_EVENT" = "SubagentStop" ]; th
     if should_patch_subagent_update "$STATUS_STATE" "$NEW_COUNT"; then
         # idle_busy + all agents done → repost as plain idle (triggers ping)
         if [ "$STATUS_STATE" = "idle_busy" ] && [ "$NEW_COUNT" = "0" ]; then
-            if [ -n "${CLAUDE_NOTIFY_WEBHOOK:-}" ]; then
-                repost_status_message "idle"
-            fi
+            repost_status_message "idle"
         else
             # idle_busy needs subagent count passed as extra for the embed
             if [ "$STATUS_STATE" = "idle_busy" ]; then
