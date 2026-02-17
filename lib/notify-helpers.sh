@@ -125,7 +125,15 @@ read_status_state() {
 }
 
 write_status_state() {
-    safe_write_file "$THROTTLE_DIR/status-state-${PROJECT_NAME}" "$1"
+    local new_state="$1"
+    local current_state
+    current_state="$(read_status_state)"
+
+    safe_write_file "$THROTTLE_DIR/status-state-${PROJECT_NAME}" "$new_state"
+    # Only update last-state-change on actual transitions (not same-state writes)
+    if [ "$current_state" != "$new_state" ]; then
+        write_last_state_change "$(date +%s)"
+    fi
 }
 
 read_status_msg_id() {
@@ -192,6 +200,41 @@ read_subagent_count() {
     fi
 }
 
+read_bg_bash_count() {
+    local file="$THROTTLE_DIR/bg-bash-count-${PROJECT_NAME}"
+    if [ -f "$file" ]; then
+        cat "$file" 2>/dev/null || echo "0"
+    else
+        echo "0"
+    fi
+}
+
+write_bg_bash_count() {
+    safe_write_file "$THROTTLE_DIR/bg-bash-count-${PROJECT_NAME}" "$1"
+}
+
+read_peak_bg_bash() {
+    local file="$THROTTLE_DIR/peak-bg-bash-${PROJECT_NAME}"
+    if [ -f "$file" ]; then
+        cat "$file" 2>/dev/null || echo "0"
+    else
+        echo "0"
+    fi
+}
+
+write_peak_bg_bash() {
+    safe_write_file "$THROTTLE_DIR/peak-bg-bash-${PROJECT_NAME}" "$1"
+}
+
+read_last_state_change() {
+    local file="$THROTTLE_DIR/last-state-change-${PROJECT_NAME}"
+    [ -f "$file" ] && cat "$file" 2>/dev/null || true
+}
+
+write_last_state_change() {
+    safe_write_file "$THROTTLE_DIR/last-state-change-${PROJECT_NAME}" "$1"
+}
+
 # Clear status/throttle/subagent files for a project.
 # Pass "keep_msg_id" to preserve the Discord message ID
 # (SessionEnd needs this so the next SessionStart can delete the offline message).
@@ -209,6 +252,10 @@ clear_status_files() {
     rm -f "$THROTTLE_DIR/peak-subagents-${PROJECT_NAME}" 2>/dev/null || true
     rm -f "$THROTTLE_DIR/last-tool-${PROJECT_NAME}" 2>/dev/null || true
     rm -f "$THROTTLE_DIR/last-activity-${PROJECT_NAME}" 2>/dev/null || true
+    rm -f "$THROTTLE_DIR/bg-bash-count-${PROJECT_NAME}" 2>/dev/null || true
+    rm -f "$THROTTLE_DIR/peak-bg-bash-${PROJECT_NAME}" 2>/dev/null || true
+    rm -f "$THROTTLE_DIR/last-state-change-${PROJECT_NAME}" 2>/dev/null || true
+    rm -f "$THROTTLE_DIR/heartbeat-pid-${PROJECT_NAME}" 2>/dev/null || true
 }
 
 # -- Project colors (Discord embed sidebar, decimal RGB) --
@@ -256,6 +303,21 @@ build_status_payload() {
         fi
     fi
 
+    # Stale detection: append "(stale?)" to title if state unchanged for too long
+    local stale_suffix=""
+    local stale_threshold="${CLAUDE_NOTIFY_STALE_THRESHOLD:-18000}"
+    if ! [[ "$stale_threshold" =~ ^[0-9]+$ ]]; then
+        stale_threshold=18000
+    fi
+    local last_change=$(read_last_state_change)
+    if [ -n "$last_change" ] && [[ "$last_change" =~ ^[0-9]+$ ]]; then
+        local now_stale=$(date +%s)
+        local state_age=$(( now_stale - last_change ))
+        if [ "$state_age" -gt "$stale_threshold" ]; then
+            stale_suffix=" (stale?)"
+        fi
+    fi
+
     case "$state" in
         online)
             color="${CLAUDE_NOTIFY_ONLINE_COLOR:-3066993}"
@@ -263,8 +325,9 @@ build_status_payload() {
                 echo "claude-notify: warning: CLAUDE_NOTIFY_ONLINE_COLOR '$color' is out of range (0-16777215), using default" >&2
                 color="3066993"
             fi
-            title="🟢 ${PROJECT_NAME} — Session Online"
+            title="🟢 ${PROJECT_NAME} — Session Online${stale_suffix}"
             local tc=$(read_tool_count)
+            local bg_bashes=$(read_bg_bash_count)
             if [ "${CLAUDE_NOTIFY_SHOW_ACTIVITY:-false}" = "true" ] && [ "$tc" -gt 0 ] 2>/dev/null; then
                 local base='[]'
                 base=$(echo "$base" | jq -c --arg v "$tc" '. + [{"name": "Tools Used", "value": $v, "inline": true}]')
@@ -276,6 +339,9 @@ build_status_payload() {
                 if [ "$subs" -gt 0 ] 2>/dev/null; then
                     base=$(echo "$base" | jq -c --arg v "$subs" '. + [{"name": "Subagents", "value": $v, "inline": true}]')
                 fi
+                if [ "$bg_bashes" -gt 0 ] 2>/dev/null; then
+                    base=$(echo "$base" | jq -c --arg v "$bg_bashes" '. + [{"name": "BG Bashes", "value": $v, "inline": true}]')
+                fi
                 fields=$(jq -c -n --argjson base "$base" --argjson extra "$extra_fields" '$base + $extra')
             else
                 local base=$(jq -c -n '[{"name": "Status", "value": "Session started", "inline": false}]')
@@ -284,24 +350,38 @@ build_status_payload() {
                 if [ "$subs" -gt 0 ] 2>/dev/null; then
                     base=$(echo "$base" | jq -c --arg v "$subs" '. + [{"name": "Subagents", "value": $v, "inline": true}]')
                 fi
+                if [ "$bg_bashes" -gt 0 ] 2>/dev/null; then
+                    base=$(echo "$base" | jq -c --arg v "$bg_bashes" '. + [{"name": "BG Bashes", "value": $v, "inline": true}]')
+                fi
                 fields=$(jq -c -n --argjson base "$base" --argjson extra "$extra_fields" '$base + $extra')
             fi
             ;;
         idle)
             color=$(get_project_color "$PROJECT_NAME")
-            title="🦀 ${PROJECT_NAME} — Ready for input"
-            local base=$(jq -c -n '[{"name": "Status", "value": "Waiting for input", "inline": false}]')
+            title="🦀 ${PROJECT_NAME} — Ready for input${stale_suffix}"
+            local bg_bashes=$(read_bg_bash_count)
+            local status_text="Waiting for input"
+            if [ "$bg_bashes" -gt 0 ] 2>/dev/null; then
+                local bg_label="bg bashes launched"
+                [ "$bg_bashes" -eq 1 ] && bg_label="bg bash launched"
+                status_text="Waiting for input (${bg_bashes} ${bg_label})"
+            fi
+            local base=$(jq -c -n --arg v "$status_text" '[{"name": "Status", "value": $v, "inline": false}]')
             fields=$(jq -c -n --argjson base "$base" --argjson extra "$extra_fields" '$base + $extra')
             ;;
         idle_busy)
             color=$(get_project_color "$PROJECT_NAME")
-            title="🔄 ${PROJECT_NAME} — Idle"
+            title="🔄 ${PROJECT_NAME} — Idle${stale_suffix}"
+            local bg_bashes=$(read_bg_bash_count)
             local base=$(jq -c -n \
                 --arg subs "**${extra}** running" \
                 '[
                     {"name": "Status", "value": "Main loop idle, waiting for subagents", "inline": false},
                     {"name": "Subagents", "value": $subs, "inline": true}
                 ]')
+            if [ "$bg_bashes" -gt 0 ] 2>/dev/null; then
+                base=$(echo "$base" | jq -c --arg v "$bg_bashes" '. + [{"name": "BG Bashes", "value": $v, "inline": true}]')
+            fi
             fields=$(jq -c -n --argjson base "$base" --argjson extra "$extra_fields" '$base + $extra')
             ;;
         permission)
@@ -310,7 +390,7 @@ build_status_payload() {
                 echo "claude-notify: warning: CLAUDE_NOTIFY_PERMISSION_COLOR '$color' is out of range (0-16777215), using default" >&2
                 color="16753920"
             fi
-            title="🔐 ${PROJECT_NAME} — Needs Approval"
+            title="🔐 ${PROJECT_NAME} — Needs Approval${stale_suffix}"
             local detail=""
             if [ -n "$extra" ]; then
                 if [ "${#extra}" -gt 1000 ]; then
@@ -332,7 +412,7 @@ build_status_payload() {
                 echo "claude-notify: warning: CLAUDE_NOTIFY_APPROVAL_COLOR '$color' is out of range (0-16777215), using default" >&2
                 color="3066993"
             fi
-            title="✅ ${PROJECT_NAME} — Permission Approved"
+            title="✅ ${PROJECT_NAME} — Permission Approved${stale_suffix}"
             local base=$(jq -c -n '[{"name": "Status", "value": "Permission granted, tool executed successfully", "inline": false}]')
             fields=$(jq -c -n --argjson base "$base" --argjson extra "$extra_fields" '$base + $extra')
             ;;
@@ -352,6 +432,10 @@ build_status_payload() {
             local peak=$(read_peak_subagents)
             if [ "$peak" -gt 0 ] 2>/dev/null; then
                 summary=$(echo "$summary" | jq -c --arg v "$peak" '. + [{"name": "Peak Subagents", "value": $v, "inline": true}]')
+            fi
+            local peak_bg=$(read_peak_bg_bash)
+            if [ "$peak_bg" -gt 0 ] 2>/dev/null; then
+                summary=$(echo "$summary" | jq -c --arg v "$peak_bg" '. + [{"name": "Peak BG Bashes", "value": $v, "inline": true}]')
             fi
             fields=$(jq -c -n --argjson summary "$summary" --argjson extra "$extra_fields" '$summary + $extra')
             ;;

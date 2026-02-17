@@ -54,6 +54,8 @@ if [ -f "$NOTIFY_DIR/.env" ]; then
     load_env_var CLAUDE_NOTIFY_OFFLINE_COLOR
     load_env_var CLAUDE_NOTIFY_APPROVAL_COLOR
     load_env_var CLAUDE_NOTIFY_PERMISSION_COLOR
+    load_env_var CLAUDE_NOTIFY_HEARTBEAT_INTERVAL
+    load_env_var CLAUDE_NOTIFY_STALE_THRESHOLD
 fi
 
 # Check enabled state (file-based .disabled takes precedence over env var)
@@ -299,16 +301,49 @@ if [ "$HOOK_EVENT" = "SessionStart" ]; then
                 2>/dev/null || true
         fi
     fi
+    # Kill stale heartbeat from previous session BEFORE clear_status_files
+    # (clear_status_files removes the PID file we need to read)
+    HEARTBEAT_PID_FILE="$THROTTLE_DIR/heartbeat-pid-${PROJECT_NAME}"
+    if [ -f "$HEARTBEAT_PID_FILE" ]; then
+        OLD_HB_PID=$(cat "$HEARTBEAT_PID_FILE" 2>/dev/null || true)
+        if [ -n "$OLD_HB_PID" ] && kill -0 "$OLD_HB_PID" 2>/dev/null; then
+            kill "$OLD_HB_PID" 2>/dev/null || true
+        fi
+    fi
+
     clear_status_files
     write_session_start "$(date +%s)"
     write_tool_count "0"
     write_peak_subagents "0"
+    write_bg_bash_count "0"
+    write_peak_bg_bash "0"
     post_status_message "online"
+
+    # Spawn heartbeat background process
+    # Launch heartbeat (passes required env vars via export inheritance)
+    export THROTTLE_DIR NOTIFY_DIR PROJECT_NAME SUBAGENT_COUNT_FILE
+    export CLAUDE_NOTIFY_WEBHOOK CLAUDE_NOTIFY_HEARTBEAT_INTERVAL CLAUDE_NOTIFY_STALE_THRESHOLD
+    export CLAUDE_NOTIFY_BOT_NAME CLAUDE_NOTIFY_ONLINE_COLOR CLAUDE_NOTIFY_OFFLINE_COLOR
+    export CLAUDE_NOTIFY_APPROVAL_COLOR CLAUDE_NOTIFY_PERMISSION_COLOR
+    nohup bash "$SCRIPT_DIR/lib/heartbeat.sh" "$PROJECT_NAME" </dev/null >/dev/null 2>&1 &
+    safe_write_file "$HEARTBEAT_PID_FILE" "$!"
+
     exit 0
 fi
 
 if [ "$HOOK_EVENT" = "SessionEnd" ]; then
+    # Kill heartbeat BEFORE webhook check — heartbeat is independent of webhook config
+    HEARTBEAT_PID_FILE="$THROTTLE_DIR/heartbeat-pid-${PROJECT_NAME}"
+    if [ -f "$HEARTBEAT_PID_FILE" ]; then
+        HB_PID=$(cat "$HEARTBEAT_PID_FILE" 2>/dev/null || true)
+        if [ -n "$HB_PID" ] && kill -0 "$HB_PID" 2>/dev/null; then
+            kill "$HB_PID" 2>/dev/null || true
+        fi
+        rm -f "$HEARTBEAT_PID_FILE"
+    fi
+
     [ -z "${CLAUDE_NOTIFY_WEBHOOK:-}" ] && exit 0
+
     CURRENT_STATE=$(read_status_state)
     if [ -n "$CURRENT_STATE" ] && [ "$CURRENT_STATE" != "offline" ]; then
         patch_status_message "offline"
@@ -328,11 +363,24 @@ if [ "$HOOK_EVENT" = "PostToolUse" ]; then
     if [ -n "$TOOL_NAME" ]; then
         write_last_tool "$TOOL_NAME"
     fi
+    # Detect background bash launches
+    if [ "$TOOL_NAME" = "Bash" ] && [ -n "$TOOL_INPUT" ] && [ "$TOOL_INPUT" != "null" ]; then
+        RUN_IN_BG=$(echo "$TOOL_INPUT" | jq -r '.run_in_background // false' 2>/dev/null)
+        if [ "$RUN_IN_BG" = "true" ]; then
+            BG_COUNT=$(read_bg_bash_count)
+            NEW_BG=$(( BG_COUNT + 1 ))
+            write_bg_bash_count "$NEW_BG"
+            PEAK_BG=$(read_peak_bg_bash)
+            if [ "$NEW_BG" -gt "$PEAK_BG" ]; then
+                write_peak_bg_bash "$NEW_BG"
+            fi
+        fi
+    fi
     CURRENT_STATE=$(read_status_state)
     case "$CURRENT_STATE" in
         permission)     patch_status_message "approved" ;;
         idle|idle_busy)
-            # Only transition to online if no subagents are running.
+            # Only transition to online if no subagents or bg bashes are running.
             # PostToolUse fires for subagent tool use too — don't let
             # subagent activity revert idle/idle_busy back to online.
             SUBS=$(read_subagent_count)
@@ -368,18 +416,26 @@ MESSAGE=$(echo "$INPUT" | jq -r '.message // empty' 2>/dev/null)
 case "$NOTIFICATION_TYPE" in
     idle_prompt)
         SUBAGENTS=$(read_subagent_count)
+        BG_BASHES=$(read_bg_bash_count)
 
-        if [ "$SUBAGENTS" -gt 0 ]; then
-            # Dedup: suppress if subagent count hasn't changed since last notification
-            LAST_COUNT_FILE="$THROTTLE_DIR/last-idle-count-${PROJECT_NAME}"
-            LAST_COUNT=""
-            [ -f "$LAST_COUNT_FILE" ] && LAST_COUNT=$(cat "$LAST_COUNT_FILE" 2>/dev/null || echo "")
-            [ "$SUBAGENTS" = "$LAST_COUNT" ] && exit 0
-            # Minimum 15s between subagent-count updates (prevent Discord rate limiting)
-            throttle_check "idle-busy-${PROJECT_NAME}" 15 || exit 0
-            safe_write_file "$LAST_COUNT_FILE" "$SUBAGENTS"
+        if [ "$SUBAGENTS" -gt 0 ] || [ "$BG_BASHES" -gt 0 ]; then
+            if [ "$SUBAGENTS" -gt 0 ]; then
+                # Dedup: suppress if subagent count hasn't changed since last notification
+                LAST_COUNT_FILE="$THROTTLE_DIR/last-idle-count-${PROJECT_NAME}"
+                LAST_COUNT=""
+                [ -f "$LAST_COUNT_FILE" ] && LAST_COUNT=$(cat "$LAST_COUNT_FILE" 2>/dev/null || echo "")
+                [ "$SUBAGENTS" = "$LAST_COUNT" ] && exit 0
+                # Minimum 15s between subagent-count updates (prevent Discord rate limiting)
+                throttle_check "idle-busy-${PROJECT_NAME}" 15 || exit 0
+                safe_write_file "$LAST_COUNT_FILE" "$SUBAGENTS"
 
-            repost_status_message "idle_busy" "$SUBAGENTS"
+                repost_status_message "idle_busy" "$SUBAGENTS"
+            else
+                # BG bashes only (no subagents) — show idle with bg bash info in status text
+                CURRENT_STATE=$(read_status_state)
+                [ "$CURRENT_STATE" = "idle" ] && exit 0
+                repost_status_message "idle"
+            fi
         else
             # Clear last count so next subagent session starts fresh
             rm -f "$THROTTLE_DIR/last-idle-count-${PROJECT_NAME}"
