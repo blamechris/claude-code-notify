@@ -66,7 +66,7 @@ All config lives in `~/.claude-notify/` (override with `CLAUDE_NOTIFY_DIR` env v
 | `CLAUDE_NOTIFY_SHOW_FULL_PATH` | `false` | Show full working directory path instead of project name |
 | `CLAUDE_NOTIFY_SHOW_ACTIVITY` | `false` | Show activity metrics (Tools Used, Last Tool) in online embed. Enables periodic heartbeat PATCHes |
 | `CLAUDE_NOTIFY_ACTIVITY_THROTTLE` | `30` | Seconds between heartbeat updates when activity tracking is enabled |
-| `CLAUDE_NOTIFY_HEARTBEAT_INTERVAL` | `300` | Seconds between background heartbeat PATCHes (keeps elapsed time fresh). Set to `0` to disable. Values below 10 reset to default |
+| `CLAUDE_NOTIFY_HEARTBEAT_INTERVAL` | `300` | Seconds between background heartbeat PATCHes (keeps elapsed time fresh). Set to `0` to disable. Non-zero values below 10 are ignored (default used) |
 | `CLAUDE_NOTIFY_STALE_THRESHOLD` | `18000` | Seconds before a session in the same state gets a "(stale?)" title suffix (default 5 hours) |
 | `DISCORD_BOT_TOKEN` | *(optional)* | Bot token for bulk operations (channel cleanup, not needed for hooks) |
 | `DISCORD_DELETE_DELAY` | `0.5` | Seconds between deletions in bulk delete script (rate limiting) |
@@ -149,7 +149,7 @@ CLAUDE_NOTIFY_SHOW_ACTIVITY=true
 - Tools Used — total tool calls in the session
 - Last Tool — most recent tool name
 - Subagent count (always shown when > 0, even without activity tracking)
-- BG Bashes — background bash commands launched (always shown when > 0)
+- BG Bashes — background bash commands launched (always shown when > 0, even without activity tracking)
 
 These flags default to `false` to keep notifications clean. Enable them when you need more diagnostic information or are managing multiple sessions.
 
@@ -306,7 +306,7 @@ The counter resets on session start.
 A background process (`lib/heartbeat.sh`) spawns on `SessionStart` and is killed on `SessionEnd`. It PATCHes the embed at a regular interval (default every 5 minutes) to keep the footer's elapsed time accurate between hook events.
 
 **Configuration:**
-- `CLAUDE_NOTIFY_HEARTBEAT_INTERVAL` — seconds between PATCHes (default `300`, set to `0` to disable; values below `10` reset to default)
+- `CLAUDE_NOTIFY_HEARTBEAT_INTERVAL` — seconds between PATCHes (default `300`, set to `0` to disable; non-zero values below `10` are ignored and the default is used)
 - `CLAUDE_NOTIFY_STALE_THRESHOLD` — seconds before a session in the same state gets a "(stale?)" title suffix (default `18000` = 5 hours)
 
 Stale detection flags sessions that may have been abandoned — if the state hasn't changed for longer than the threshold, the embed title gets a "(stale?)" suffix. The suffix clears automatically when the state changes.
