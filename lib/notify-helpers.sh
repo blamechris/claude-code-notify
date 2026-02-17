@@ -388,11 +388,17 @@ build_status_payload() {
 # Determines whether a SubagentStart/Stop event should trigger a Discord PATCH.
 # Returns 0 (should PATCH) or 1 (should not). Caller handles the actual PATCH.
 # Accepts optional $1 = pre-read state (avoids double-read race with caller).
+# Accepts optional $2 = new subagent count (bypasses throttle when 0).
 should_patch_subagent_update() {
     [ -z "${CLAUDE_NOTIFY_WEBHOOK:-}" ] && return 1
     local state="${1:-$(read_status_state)}"
+    local new_count="${2:-}"
     case "$state" in
-        online)
+        online|idle_busy|approved)
+            # Count reaching 0 = all agents done; always let it through
+            if [ "$new_count" = "0" ]; then
+                return 0
+            fi
             throttle_check "subagent-${PROJECT_NAME}" 10
             return $?
             ;;
