@@ -77,7 +77,7 @@ assert_eq "online payload hides BG Bashes when 0" "" "$bg_field"
 write_bg_bash_count "3"
 payload=$(build_status_payload "idle")
 status_val=$(echo "$payload" | jq -r '.embeds[0].fields[] | select(.name == "Status") | .value')
-assert_match "idle status text includes bg bash count" "3 bg bash running" "$status_val"
+assert_match "idle status text includes bg bash count" "3 bg bashes launched" "$status_val"
 
 # 10. idle with 0 bg bashes shows plain status
 write_bg_bash_count "0"

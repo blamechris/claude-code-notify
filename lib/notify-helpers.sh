@@ -125,8 +125,15 @@ read_status_state() {
 }
 
 write_status_state() {
-    safe_write_file "$THROTTLE_DIR/status-state-${PROJECT_NAME}" "$1"
-    write_last_state_change "$(date +%s)"
+    local new_state="$1"
+    local current_state
+    current_state="$(read_status_state)"
+
+    safe_write_file "$THROTTLE_DIR/status-state-${PROJECT_NAME}" "$new_state"
+    # Only update last-state-change on actual transitions (not same-state writes)
+    if [ "$current_state" != "$new_state" ]; then
+        write_last_state_change "$(date +%s)"
+    fi
 }
 
 read_status_msg_id() {
@@ -299,6 +306,9 @@ build_status_payload() {
     # Stale detection: append "(stale?)" to title if state unchanged for too long
     local stale_suffix=""
     local stale_threshold="${CLAUDE_NOTIFY_STALE_THRESHOLD:-18000}"
+    if ! [[ "$stale_threshold" =~ ^[0-9]+$ ]]; then
+        stale_threshold=18000
+    fi
     local last_change=$(read_last_state_change)
     if [ -n "$last_change" ] && [[ "$last_change" =~ ^[0-9]+$ ]]; then
         local now_stale=$(date +%s)
@@ -352,7 +362,9 @@ build_status_payload() {
             local bg_bashes=$(read_bg_bash_count)
             local status_text="Waiting for input"
             if [ "$bg_bashes" -gt 0 ] 2>/dev/null; then
-                status_text="Waiting for input (${bg_bashes} bg bash running)"
+                local bg_label="bg bashes launched"
+                [ "$bg_bashes" -eq 1 ] && bg_label="bg bash launched"
+                status_text="Waiting for input (${bg_bashes} ${bg_label})"
             fi
             local base=$(jq -c -n --arg v "$status_text" '[{"name": "Status", "value": $v, "inline": false}]')
             fields=$(jq -c -n --argjson base "$base" --argjson extra "$extra_fields" '$base + $extra')

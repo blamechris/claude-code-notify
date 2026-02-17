@@ -32,12 +32,25 @@ assert_eq "read_last_state_change default is empty" "" "$(read_last_state_change
 write_last_state_change "1700000000"
 assert_eq "read_last_state_change reads written value" "1700000000" "$(read_last_state_change)"
 
-# 3. write_status_state auto-writes last_state_change
+# 3. write_status_state auto-writes last_state_change on state transition
 rm -f "$THROTTLE_DIR/last-state-change-${PROJECT_NAME}"
+rm -f "$THROTTLE_DIR/status-state-${PROJECT_NAME}"
 write_status_state "online"
 LAST_CHANGE=$(read_last_state_change)
-assert_true "write_status_state sets last_state_change" [ -n "$LAST_CHANGE" ]
+assert_true "write_status_state sets last_state_change on transition" [ -n "$LAST_CHANGE" ]
 assert_true "last_state_change is a recent timestamp" [ "$LAST_CHANGE" -gt 1000000000 ]
+
+# 3b. write_status_state does NOT update last_state_change on same-state write
+OLD_CHANGE="$LAST_CHANGE"
+sleep 1
+write_status_state "online"
+NEW_CHANGE=$(read_last_state_change)
+assert_eq "Same-state write does not update timestamp" "$OLD_CHANGE" "$NEW_CHANGE"
+
+# 3c. write_status_state updates timestamp on actual transition
+write_status_state "idle"
+TRANSITION_CHANGE=$(read_last_state_change)
+assert_true "State transition updates timestamp" [ "$TRANSITION_CHANGE" -ge "$OLD_CHANGE" ]
 
 # 4. clear_status_files removes last-state-change file
 write_last_state_change "1700000000"
@@ -62,7 +75,7 @@ RECENT=$(date +%s)
 write_last_state_change "$RECENT"
 payload=$(build_status_payload "online")
 title=$(echo "$payload" | jq -r '.embeds[0].title')
-assert_false "Recent title does not contain '(stale?)'" echo "$title" | grep -q "stale?"
+assert_false "Recent title does not contain '(stale?)'" grep -q "stale?" <<< "$title"
 
 # 7. Stale detection works for idle state
 write_last_state_change "$PAST"
@@ -79,14 +92,14 @@ assert_match "Stale permission title contains '(stale?)'" "stale\\?" "$title"
 rm -f "$THROTTLE_DIR/last-state-change-${PROJECT_NAME}"
 payload=$(build_status_payload "online")
 title=$(echo "$payload" | jq -r '.embeds[0].title')
-assert_false "No stale when no state change file" echo "$title" | grep -q "stale?"
+assert_false "No stale when no state change file" grep -q "stale?" <<< "$title"
 
 # 10. Default stale threshold (18000s) doesn't trigger for recent state
 unset CLAUDE_NOTIFY_STALE_THRESHOLD
 write_last_state_change "$(date +%s)"
 payload=$(build_status_payload "online")
 title=$(echo "$payload" | jq -r '.embeds[0].title')
-assert_false "Default threshold: recent state not stale" echo "$title" | grep -q "stale?"
+assert_false "Default threshold: recent state not stale" grep -q "stale?" <<< "$title"
 
 # -- Cleanup and summary --
 

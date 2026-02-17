@@ -301,6 +301,16 @@ if [ "$HOOK_EVENT" = "SessionStart" ]; then
                 2>/dev/null || true
         fi
     fi
+    # Kill stale heartbeat from previous session BEFORE clear_status_files
+    # (clear_status_files removes the PID file we need to read)
+    HEARTBEAT_PID_FILE="$THROTTLE_DIR/heartbeat-pid-${PROJECT_NAME}"
+    if [ -f "$HEARTBEAT_PID_FILE" ]; then
+        OLD_HB_PID=$(cat "$HEARTBEAT_PID_FILE" 2>/dev/null || true)
+        if [ -n "$OLD_HB_PID" ] && kill -0 "$OLD_HB_PID" 2>/dev/null; then
+            kill "$OLD_HB_PID" 2>/dev/null || true
+        fi
+    fi
+
     clear_status_files
     write_session_start "$(date +%s)"
     write_tool_count "0"
@@ -310,15 +320,6 @@ if [ "$HOOK_EVENT" = "SessionStart" ]; then
     post_status_message "online"
 
     # Spawn heartbeat background process
-    HEARTBEAT_PID_FILE="$THROTTLE_DIR/heartbeat-pid-${PROJECT_NAME}"
-    # Kill stale heartbeat from previous session (if any)
-    if [ -f "$HEARTBEAT_PID_FILE" ]; then
-        OLD_HB_PID=$(cat "$HEARTBEAT_PID_FILE" 2>/dev/null || true)
-        if [ -n "$OLD_HB_PID" ] && kill -0 "$OLD_HB_PID" 2>/dev/null; then
-            kill "$OLD_HB_PID" 2>/dev/null || true
-        fi
-        rm -f "$HEARTBEAT_PID_FILE"
-    fi
     # Launch heartbeat (passes required env vars via export inheritance)
     export THROTTLE_DIR NOTIFY_DIR PROJECT_NAME SUBAGENT_COUNT_FILE
     export CLAUDE_NOTIFY_WEBHOOK CLAUDE_NOTIFY_HEARTBEAT_INTERVAL CLAUDE_NOTIFY_STALE_THRESHOLD
@@ -331,9 +332,7 @@ if [ "$HOOK_EVENT" = "SessionStart" ]; then
 fi
 
 if [ "$HOOK_EVENT" = "SessionEnd" ]; then
-    [ -z "${CLAUDE_NOTIFY_WEBHOOK:-}" ] && exit 0
-
-    # Kill heartbeat background process
+    # Kill heartbeat BEFORE webhook check — heartbeat is independent of webhook config
     HEARTBEAT_PID_FILE="$THROTTLE_DIR/heartbeat-pid-${PROJECT_NAME}"
     if [ -f "$HEARTBEAT_PID_FILE" ]; then
         HB_PID=$(cat "$HEARTBEAT_PID_FILE" 2>/dev/null || true)
@@ -342,6 +341,8 @@ if [ "$HOOK_EVENT" = "SessionEnd" ]; then
         fi
         rm -f "$HEARTBEAT_PID_FILE"
     fi
+
+    [ -z "${CLAUDE_NOTIFY_WEBHOOK:-}" ] && exit 0
 
     CURRENT_STATE=$(read_status_state)
     if [ -n "$CURRENT_STATE" ] && [ "$CURRENT_STATE" != "offline" ]; then
@@ -430,9 +431,10 @@ case "$NOTIFICATION_TYPE" in
 
                 repost_status_message "idle_busy" "$SUBAGENTS"
             else
-                # BG bashes only (no subagents) — show idle_busy with 0 subagents
-                throttle_check "idle-busy-${PROJECT_NAME}" 15 || exit 0
-                repost_status_message "idle_busy" "0"
+                # BG bashes only (no subagents) — show idle with bg bash info in status text
+                CURRENT_STATE=$(read_status_state)
+                [ "$CURRENT_STATE" = "idle" ] && exit 0
+                repost_status_message "idle"
             fi
         else
             # Clear last count so next subagent session starts fresh

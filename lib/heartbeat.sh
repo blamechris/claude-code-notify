@@ -39,8 +39,13 @@ trap cleanup EXIT TERM INT
 safe_write_file "$PID_FILE" "$$"
 
 INTERVAL="${CLAUDE_NOTIFY_HEARTBEAT_INTERVAL:-300}"
-# Validate interval is numeric
-if ! [[ "$INTERVAL" =~ ^[0-9]+$ ]] || [ "$INTERVAL" -lt 10 ]; then
+# Validate interval is numeric and handle special cases
+if ! [[ "$INTERVAL" =~ ^[0-9]+$ ]]; then
+    INTERVAL=300
+elif [ "$INTERVAL" -eq 0 ]; then
+    # Interval=0 disables heartbeat as documented
+    exit 0
+elif [ "$INTERVAL" -lt 10 ]; then
     INTERVAL=300
 fi
 
