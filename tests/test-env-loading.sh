@@ -100,9 +100,8 @@ assert_false "Invalid var name 'foo;rm' rejected" load_env_var "foo;rm"
 printf '123BAD=oops\n' > "$NOTIFY_DIR/.env"
 assert_false "Var name starting with digit rejected" load_env_var "123BAD"
 
-# 15. Empty var name is rejected
-load_env_var "" || true
-assert_eq "Empty var name rejected (no crash)" "" ""
+# 15. Empty var name is rejected (returns non-zero)
+assert_false "Empty var name is rejected" load_env_var ""
 
 # 16. Valid var name with underscores and digits still works
 printf 'MY_VAR_2=hello\n' > "$NOTIFY_DIR/.env"
