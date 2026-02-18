@@ -90,6 +90,28 @@ unset TEST_VAR 2>/dev/null || true
 load_env_var "TEST_VAR"
 assert_eq "Variable not in .env stays unset" "" "${TEST_VAR:-}"
 
+# -- load_env_var eval guard tests (#131) --
+
+# 13. Invalid var name with shell metacharacters is rejected
+printf 'foo;rm=pwned\n' > "$NOTIFY_DIR/.env"
+load_env_var "foo;rm" || true
+assert_eq "Invalid var name 'foo;rm' rejected" "" "${foo_rm:-}"
+
+# 14. Var name starting with digit is rejected (returns 1)
+printf '123BAD=oops\n' > "$NOTIFY_DIR/.env"
+assert_false "Var name starting with digit rejected" load_env_var "123BAD"
+
+# 15. Empty var name is rejected
+load_env_var "" || true
+assert_eq "Empty var name rejected (no crash)" "" ""
+
+# 16. Valid var name with underscores and digits still works
+printf 'MY_VAR_2=hello\n' > "$NOTIFY_DIR/.env"
+unset MY_VAR_2 2>/dev/null || true
+load_env_var "MY_VAR_2"
+assert_eq "Valid var name MY_VAR_2 works" "hello" "${MY_VAR_2:-}"
+unset MY_VAR_2 2>/dev/null || true
+
 # -- Cleanup and summary --
 
 test_summary

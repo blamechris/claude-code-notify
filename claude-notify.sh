@@ -342,7 +342,7 @@ if [ "$HOOK_EVENT" = "SessionStart" ]; then
     export CLAUDE_NOTIFY_APPROVAL_COLOR CLAUDE_NOTIFY_PERMISSION_COLOR
     # Extra fields context for heartbeat embed refresh
     export SESSION_ID CWD PERMISSION_MODE
-    export CLAUDE_NOTIFY_SHOW_SESSION_INFO CLAUDE_NOTIFY_SHOW_FULL_PATH CLAUDE_NOTIFY_SHOW_TOOL_INFO
+    export CLAUDE_NOTIFY_SHOW_SESSION_INFO CLAUDE_NOTIFY_SHOW_FULL_PATH
     nohup bash "$SCRIPT_DIR/lib/heartbeat.sh" "$PROJECT_NAME" </dev/null >/dev/null 2>&1 &
     safe_write_file "$HEARTBEAT_PID_FILE" "$!"
 
