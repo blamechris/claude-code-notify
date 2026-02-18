@@ -73,6 +73,14 @@ while true; do
     EXTRA_FIELDS=$(build_extra_fields "${SESSION_ID:-}" "${PERMISSION_MODE:-}" "${CWD:-}" "" "")
     PAYLOAD=$(build_status_payload "$STATE" "$EXTRA" "$EXTRA_FIELDS")
 
+    # Re-read state to minimize TOCTOU window — if the main script changed state
+    # while we were building the payload, skip this PATCH to avoid overwriting
+    # the main script's more recent state on Discord.
+    CURRENT_STATE=$(read_status_state)
+    if [ "$CURRENT_STATE" != "$STATE" ]; then
+        continue
+    fi
+
     if WEBHOOK_ID_TOKEN=$(extract_webhook_id_token "$CLAUDE_NOTIFY_WEBHOOK"); then
         curl -s -o /dev/null -w "" \
             -X PATCH \
