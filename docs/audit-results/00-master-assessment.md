@@ -210,4 +210,4 @@ The project is in a strong position. The core architecture is sound, the competi
 
 A reusable `/project-audit` skill was designed during this audit. See:
 - Skill definition: `.claude/commands/project-audit.md`
-- Design document: `.claude/commands/project-audit-design.md`
+- Design document: `docs/audit-results/project-audit-design.md`
