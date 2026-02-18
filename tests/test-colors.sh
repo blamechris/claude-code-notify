@@ -101,8 +101,8 @@ EOF
 result=$(get_project_color "my.project")
 assert_eq "Dotted project 'my.project' matches exactly" "12345" "$result"
 
-# 11. Dotted project does NOT match regex-wildcard entry
-# Before the fix, "my.project" would also match "myXproject" because . is regex wildcard
+# 11. myXproject still matches its own entry (regression guard)
+# The dotted-name wildcard mismatch is verified in the result3 check below.
 result2=$(get_project_color "myXproject")
 assert_eq "myXproject matches its own entry" "99999" "$result2"
 
