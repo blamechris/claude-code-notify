@@ -25,6 +25,8 @@ check_disabled() {
     return 1  # would proceed (enabled)
 }
 
+PROJECT_NAME="test-proj-disabled"
+
 # -- Tests --
 
 # 1. .disabled file triggers disabled check
@@ -32,12 +34,28 @@ touch "$NOTIFY_DIR/.disabled"
 unset CLAUDE_NOTIFY_ENABLED 2>/dev/null || true
 assert_true ".disabled file triggers disabled exit" check_disabled
 
-# 2. No state files created when disabled (simulate by checking nothing was written)
+# 2. Guard prevents state writes when disabled
 rm -f "$THROTTLE_DIR"/status-state-* 2>/dev/null || true
-# If disabled, the script exits before writing state. Verify no state files exist.
+# Simulate the guard pattern: check_disabled && skip write (like exit 0 in production)
+if ! check_disabled; then
+    write_status_state "online"
+fi
 state_files=$(ls "$THROTTLE_DIR"/status-state-* 2>/dev/null | wc -l | tr -d ' ')
-assert_eq "No state files when .disabled exists" "0" "$state_files"
+assert_eq "No state files when .disabled guard active" "0" "$state_files"
 
+# 2b. Verify writes DO happen when enabled (proves test #2 isn't vacuous)
+rm -f "$NOTIFY_DIR/.disabled"
+unset CLAUDE_NOTIFY_ENABLED 2>/dev/null || true
+rm -f "$THROTTLE_DIR"/status-state-* 2>/dev/null || true
+if ! check_disabled; then
+    write_status_state "online"
+fi
+state_files=$(ls "$THROTTLE_DIR"/status-state-* 2>/dev/null | wc -l | tr -d ' ')
+assert_eq "State files written when enabled" "1" "$state_files"
+rm -f "$THROTTLE_DIR"/status-state-* 2>/dev/null || true
+
+# Re-disable for subsequent tests
+touch "$NOTIFY_DIR/.disabled"
 rm -f "$NOTIFY_DIR/.disabled"
 
 # 3. CLAUDE_NOTIFY_ENABLED=false triggers disabled check
