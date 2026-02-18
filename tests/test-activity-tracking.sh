@@ -23,9 +23,6 @@ source "$LIB_FILE"
 PROJECT_NAME="test-proj-activity"
 SUBAGENT_COUNT_FILE="$THROTTLE_DIR/subagent-count-${PROJECT_NAME}"
 
-# Stub build_extra_fields (no extra context in tests)
-build_extra_fields() { echo "[]"; }
-
 # -- Clean state before tests --
 clear_status_files
 

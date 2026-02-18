@@ -302,16 +302,74 @@ get_project_color() {
     echo 5793266
 }
 
+# -- Disabled state check --
+
+# Check whether notifications are disabled (via .disabled file or env var).
+# Returns 0 if disabled, 1 if enabled. Requires $NOTIFY_DIR to be set.
+check_disabled() {
+    [ -f "$NOTIFY_DIR/.disabled" ] || [ "${CLAUDE_NOTIFY_ENABLED:-}" = "false" ]
+}
+
+# -- Build extra context fields --
+
+# Builds optional Discord embed fields from session context.
+# Accepts context values as parameters instead of reading globals.
+# Args: session_id, permission_mode, cwd, tool_name, tool_input
+build_extra_fields() {
+    local session_id="${1:-}"
+    local permission_mode="${2:-}"
+    local cwd="${3:-}"
+    local tool_name="${4:-}"
+    local tool_input="${5:-}"
+    local extra_fields="[]"
+
+    # Session info (session ID, permission mode)
+    if [ "${CLAUDE_NOTIFY_SHOW_SESSION_INFO:-false}" = "true" ]; then
+        if [ -n "$session_id" ]; then
+            local short_id="${session_id:0:8}"
+            extra_fields=$(echo "$extra_fields" | jq -c --arg id "$short_id" '. + [{"name": "Session", "value": $id, "inline": true}]')
+        fi
+        if [ -n "$permission_mode" ]; then
+            extra_fields=$(echo "$extra_fields" | jq -c --arg mode "$permission_mode" '. + [{"name": "Permission Mode", "value": $mode, "inline": true}]')
+        fi
+    fi
+
+    # Full path (instead of just project name)
+    if [ "${CLAUDE_NOTIFY_SHOW_FULL_PATH:-false}" = "true" ] && [ -n "$cwd" ]; then
+        extra_fields=$(echo "$extra_fields" | jq -c --arg path "$cwd" '. + [{"name": "Path", "value": $path, "inline": false}]')
+    fi
+
+    # Tool info (for permissions)
+    # WARNING: commands may contain secrets (API keys, tokens). See README security considerations.
+    if [ "${CLAUDE_NOTIFY_SHOW_TOOL_INFO:-false}" = "true" ] && [ -n "$tool_name" ]; then
+        extra_fields=$(echo "$extra_fields" | jq -c --arg tool "$tool_name" '. + [{"name": "Tool", "value": $tool, "inline": true}]')
+
+        # Tool input (truncated for safety)
+        if [ -n "$tool_input" ] && [ "$tool_input" != "null" ]; then
+            local raw_detail=$(echo "$tool_input" | jq -r 'if type == "object" then (.command // .file_path // "...") else . end' 2>/dev/null)
+            local tool_detail="$raw_detail"
+            if [ "${#raw_detail}" -gt 1000 ]; then
+                tool_detail="${raw_detail:0:997}..."
+            fi
+            if [ -n "$tool_detail" ] && [ "$tool_detail" != "null" ]; then
+                extra_fields=$(echo "$extra_fields" | jq -c --arg detail "$tool_detail" '. + [{"name": "Command", "value": $detail, "inline": false}]')
+            fi
+        fi
+    fi
+
+    echo "$extra_fields"
+}
+
 # -- Build status payload --
 # Builds a Discord embed payload for any state in the lifecycle.
-# Caller must define build_extra_fields() and set $SUBAGENT_COUNT_FILE.
+# Caller must set $SUBAGENT_COUNT_FILE and pass extra_fields (from build_extra_fields).
 build_status_payload() {
     local state="$1"
     local extra="${2:-}"
+    local extra_fields="${3:-[]}"
     local title color fields
     local timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
     local bot_name="${CLAUDE_NOTIFY_BOT_NAME:-Claude Code}"
-    local extra_fields=$(build_extra_fields)
 
     local footer_text="$bot_name"
     local session_start=$(read_session_start)

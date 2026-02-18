@@ -16,14 +16,7 @@ set -uo pipefail
 source "$HELPER_FILE"
 source "$LIB_FILE"
 
-# -- Helper: simulate the disabled check from claude-notify.sh:62-64 --
-
-check_disabled() {
-    if [ -f "$NOTIFY_DIR/.disabled" ] || [ "${CLAUDE_NOTIFY_ENABLED:-}" = "false" ]; then
-        return 0  # would exit 0 (disabled)
-    fi
-    return 1  # would proceed (enabled)
-}
+# check_disabled() is now in the shared library (lib/notify-helpers.sh)
 
 PROJECT_NAME="test-proj-disabled"
 

@@ -22,9 +22,6 @@ source "$LIB_FILE"
 PROJECT_NAME="test-proj-bgbash"
 SUBAGENT_COUNT_FILE="$THROTTLE_DIR/subagent-count-${PROJECT_NAME}"
 
-# Stub build_extra_fields
-build_extra_fields() { echo "[]"; }
-
 # -- Helper tests --
 
 # 1. read_bg_bash_count defaults to 0
