@@ -115,6 +115,26 @@ assert_match "approved title contains 'Permission Approved'" "Permission Approve
 color_approved=$(echo "$payload_approved" | jq -r '.embeds[0].color')
 assert_eq "approved color is green" "3066993" "$color_approved"
 
+# 7b. Approved state shows subagent count when > 0 (#101)
+echo "2" > "$SUBAGENT_COUNT_FILE"
+write_bg_bash_count "3"
+payload_approved_counts=$(build_status_payload "approved")
+approved_subs=$(echo "$payload_approved_counts" | jq -r '.embeds[0].fields[] | select(.name == "Subagents") | .value')
+assert_eq "approved shows Subagents when > 0" "2" "$approved_subs"
+
+approved_bg=$(echo "$payload_approved_counts" | jq -r '.embeds[0].fields[] | select(.name == "BG Bashes") | .value')
+assert_eq "approved shows BG Bashes when > 0" "3" "$approved_bg"
+
+# 7c. Approved state hides counts when 0
+echo "0" > "$SUBAGENT_COUNT_FILE"
+write_bg_bash_count "0"
+payload_approved_zero=$(build_status_payload "approved")
+approved_no_subs=$(echo "$payload_approved_zero" | jq -r '.embeds[0].fields[] | select(.name == "Subagents") | .value')
+assert_eq "approved hides Subagents when 0" "" "$approved_no_subs"
+
+approved_no_bg=$(echo "$payload_approved_zero" | jq -r '.embeds[0].fields[] | select(.name == "BG Bashes") | .value')
+assert_eq "approved hides BG Bashes when 0" "" "$approved_no_bg"
+
 # 8. "offline" state
 payload_offline=$(build_status_payload "offline")
 assert_true "offline payload is valid JSON" \

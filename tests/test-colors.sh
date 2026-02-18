@@ -92,6 +92,30 @@ EOF
 result=$(get_project_color "dupe-project")
 assert_eq "First match wins for duplicate project names" "1111111" "$result"
 
+# 10. Dotted project name matches exact entry (#117)
+cat > "$NOTIFY_DIR/colors.conf" << 'EOF'
+my.project=12345
+myXproject=99999
+EOF
+
+result=$(get_project_color "my.project")
+assert_eq "Dotted project 'my.project' matches exactly" "12345" "$result"
+
+# 11. myXproject still matches its own entry (regression guard)
+# The dotted-name wildcard mismatch is verified in the result3 check below.
+result2=$(get_project_color "myXproject")
+assert_eq "myXproject matches its own entry" "99999" "$result2"
+
+# Verify my.project doesn't get myXproject's value (the pre-fix bug)
+# When my.project entry exists, it should get 12345, not 99999
+cat > "$NOTIFY_DIR/colors.conf" << 'EOF'
+myXproject=99999
+my.project=12345
+EOF
+
+result3=$(get_project_color "my.project")
+assert_eq "Dotted project not confused by regex wildcard match" "12345" "$result3"
+
 # -- Cleanup and summary --
 
 test_summary
