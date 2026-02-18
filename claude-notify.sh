@@ -78,7 +78,12 @@ command -v jq &>/dev/null || { echo "claude-notify: jq is required (brew install
 
 # -- Parse hook input --
 
-INPUT=$(timeout 5 cat 2>/dev/null) || true
+# Read stdin with timeout (portable: timeout may not exist on macOS)
+if command -v timeout &>/dev/null; then
+    INPUT=$(timeout 5 cat 2>/dev/null) || true
+else
+    INPUT=$(cat 2>/dev/null) || true
+fi
 
 # Validate JSON before parsing (catches malformed input early)
 if [ -n "$INPUT" ] && ! echo "$INPUT" | jq empty 2>/dev/null; then
