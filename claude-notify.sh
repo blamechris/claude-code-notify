@@ -82,9 +82,14 @@ if command -v timeout &>/dev/null; then
 else
     # bash-native fallback for macOS (no coreutils timeout command)
     INPUT=""
+    line=""
     while IFS= read -r -t 5 line; do
         INPUT="${INPUT}${INPUT:+$'\n'}${line}"
     done
+    # Handle last line without trailing newline (read sets $line then returns non-zero at EOF)
+    if [ -n "$line" ]; then
+        INPUT="${INPUT}${INPUT:+$'\n'}${line}"
+    fi
 fi
 
 # Validate JSON before parsing (catches malformed input early)
