@@ -23,28 +23,6 @@ PROJECT_NAME="${1:-}"
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 source "$SCRIPT_DIR/lib/notify-helpers.sh"
 
-# Build extra fields from inherited env vars (Session, Permission Mode, Path).
-# Deliberately omits Tool/Command — those are per-event context heartbeat doesn't have.
-build_extra_fields() {
-    local extra_fields="[]"
-
-    if [ "${CLAUDE_NOTIFY_SHOW_SESSION_INFO:-false}" = "true" ]; then
-        if [ -n "${SESSION_ID:-}" ]; then
-            local short_id="${SESSION_ID:0:8}"
-            extra_fields=$(echo "$extra_fields" | jq -c --arg id "$short_id" '. + [{"name": "Session", "value": $id, "inline": true}]')
-        fi
-        if [ -n "${PERMISSION_MODE:-}" ]; then
-            extra_fields=$(echo "$extra_fields" | jq -c --arg mode "$PERMISSION_MODE" '. + [{"name": "Permission Mode", "value": $mode, "inline": true}]')
-        fi
-    fi
-
-    if [ "${CLAUDE_NOTIFY_SHOW_FULL_PATH:-false}" = "true" ] && [ -n "${CWD:-}" ]; then
-        extra_fields=$(echo "$extra_fields" | jq -c --arg path "$CWD" '. + [{"name": "Path", "value": $path, "inline": false}]')
-    fi
-
-    echo "$extra_fields"
-}
-
 # PID file for cleanup
 PID_FILE="$THROTTLE_DIR/heartbeat-pid-${PROJECT_NAME}"
 
@@ -91,13 +69,15 @@ while true; do
         EXTRA=$(read_subagent_count)
     fi
 
-    PAYLOAD=$(build_status_payload "$STATE" "$EXTRA")
+    # Deliberately passes empty tool_name/tool_input — heartbeat has no per-event tool context
+    EXTRA_FIELDS=$(build_extra_fields "${SESSION_ID:-}" "${PERMISSION_MODE:-}" "${CWD:-}" "" "")
+    PAYLOAD=$(build_status_payload "$STATE" "$EXTRA" "$EXTRA_FIELDS")
 
     if WEBHOOK_ID_TOKEN=$(extract_webhook_id_token "$CLAUDE_NOTIFY_WEBHOOK"); then
         curl -s -o /dev/null -w "" \
             -X PATCH \
             -H "Content-Type: application/json" \
             -d "$PAYLOAD" \
-            "https://discord.com/api/webhooks/${WEBHOOK_ID_TOKEN}/messages/${MSG_ID}" 2>/dev/null || true
+            --config <(printf 'url = "%s"\n' "https://discord.com/api/webhooks/${WEBHOOK_ID_TOKEN}/messages/${MSG_ID}") 2>/dev/null || true
     fi
 done

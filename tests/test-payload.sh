@@ -22,9 +22,6 @@ source "$LIB_FILE"
 PROJECT_NAME="my-project"
 SUBAGENT_COUNT_FILE="$THROTTLE_DIR/subagent-count-${PROJECT_NAME}"
 
-# Stub build_extra_fields (no extra context in tests)
-build_extra_fields() { echo "[]"; }
-
 # -- Tests --
 
 # 1. "online" state generates valid JSON

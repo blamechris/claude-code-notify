@@ -60,9 +60,7 @@ if [ -f "$NOTIFY_DIR/.env" ]; then
 fi
 
 # Check enabled state (file-based .disabled takes precedence over env var)
-if [ -f "$NOTIFY_DIR/.disabled" ] || [ "${CLAUDE_NOTIFY_ENABLED:-}" = "false" ]; then
-    exit 0
-fi
+check_disabled && exit 0
 
 # Validate webhook URL format if set (catches typos/malformed URLs early)
 if [ -n "${CLAUDE_NOTIFY_WEBHOOK:-}" ]; then
@@ -82,7 +80,11 @@ command -v jq &>/dev/null || { echo "claude-notify: jq is required (brew install
 if command -v timeout &>/dev/null; then
     INPUT=$(timeout 5 cat 2>/dev/null) || true
 else
-    INPUT=$(cat 2>/dev/null) || true
+    # bash-native fallback for macOS (no coreutils timeout command)
+    INPUT=""
+    while IFS= read -r -t 5 line; do
+        INPUT="${INPUT}${INPUT:+$'\n'}${line}"
+    done
 fi
 
 # Validate JSON before parsing (catches malformed input early)
@@ -108,48 +110,9 @@ CWD=$(echo "$INPUT" | jq -r '.cwd // empty' 2>/dev/null)
 # Per-project subagent count file
 SUBAGENT_COUNT_FILE="$THROTTLE_DIR/subagent-count-${PROJECT_NAME}"
 
-# -- Build extra context fields for notifications (if enabled via env vars) --
-# This stays in the main script because it reads globals (SESSION_ID, CWD, etc.)
+# -- Pre-compute extra context fields (once per invocation) --
 
-build_extra_fields() {
-    local extra_fields="[]"
-
-    # Session info (session ID, permission mode)
-    if [ "${CLAUDE_NOTIFY_SHOW_SESSION_INFO:-false}" = "true" ]; then
-        if [ -n "$SESSION_ID" ]; then
-            local short_id="${SESSION_ID:0:8}"
-            extra_fields=$(echo "$extra_fields" | jq -c --arg id "$short_id" '. + [{"name": "Session", "value": $id, "inline": true}]')
-        fi
-        if [ -n "$PERMISSION_MODE" ]; then
-            extra_fields=$(echo "$extra_fields" | jq -c --arg mode "$PERMISSION_MODE" '. + [{"name": "Permission Mode", "value": $mode, "inline": true}]')
-        fi
-    fi
-
-    # Full path (instead of just project name)
-    if [ "${CLAUDE_NOTIFY_SHOW_FULL_PATH:-false}" = "true" ] && [ -n "$CWD" ]; then
-        extra_fields=$(echo "$extra_fields" | jq -c --arg path "$CWD" '. + [{"name": "Path", "value": $path, "inline": false}]')
-    fi
-
-    # Tool info (for permissions)
-    # WARNING: commands may contain secrets (API keys, tokens). See README security considerations.
-    if [ "${CLAUDE_NOTIFY_SHOW_TOOL_INFO:-false}" = "true" ] && [ -n "$TOOL_NAME" ]; then
-        extra_fields=$(echo "$extra_fields" | jq -c --arg tool "$TOOL_NAME" '. + [{"name": "Tool", "value": $tool, "inline": true}]')
-
-        # Tool input (truncated for safety)
-        if [ -n "$TOOL_INPUT" ] && [ "$TOOL_INPUT" != "null" ]; then
-            local raw_detail=$(echo "$TOOL_INPUT" | jq -r 'if type == "object" then (.command // .file_path // "...") else . end' 2>/dev/null)
-            local tool_detail="$raw_detail"
-            if [ "${#raw_detail}" -gt 1000 ]; then
-                tool_detail="${raw_detail:0:997}..."
-            fi
-            if [ -n "$tool_detail" ] && [ "$tool_detail" != "null" ]; then
-                extra_fields=$(echo "$extra_fields" | jq -c --arg detail "$tool_detail" '. + [{"name": "Command", "value": $detail, "inline": false}]')
-            fi
-        fi
-    fi
-
-    echo "$extra_fields"
-}
+EXTRA_FIELDS=$(build_extra_fields "$SESSION_ID" "$PERMISSION_MODE" "$CWD" "$TOOL_NAME" "$TOOL_INPUT")
 
 # -- POST / PATCH helpers --
 
@@ -157,13 +120,14 @@ build_extra_fields() {
 post_status_message() {
     local state="$1"
     local extra="${2:-}"
-    local payload=$(build_status_payload "$state" "$extra")
+    local ef="${3:-[]}"
+    local payload=$(build_status_payload "$state" "$extra" "$ef")
 
     for attempt in 1 2 3; do
         RESPONSE=$(curl -s -w "\n%{http_code}" \
             -H "Content-Type: application/json" \
             -d "$payload" \
-            "$CLAUDE_NOTIFY_WEBHOOK?wait=true" 2>/dev/null || true)
+            --config <(printf 'url = "%s"\n' "${CLAUDE_NOTIFY_WEBHOOK}?wait=true") 2>/dev/null || true)
 
         HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
         RESPONSE_BODY=$(echo "$RESPONSE" | sed '$d')
@@ -190,34 +154,36 @@ post_status_message() {
 repost_status_message() {
     local state="$1"
     local extra="${2:-}"
+    local ef="${3:-[]}"
     local msg_id=$(read_status_msg_id)
 
     # Delete old message if it exists
     if [ -n "$msg_id" ]; then
         if WEBHOOK_ID_TOKEN=$(extract_webhook_id_token "$CLAUDE_NOTIFY_WEBHOOK"); then
             curl -s -o /dev/null -X DELETE \
-                "https://discord.com/api/webhooks/${WEBHOOK_ID_TOKEN}/messages/${msg_id}" \
+                --config <(printf 'url = "%s"\n' "https://discord.com/api/webhooks/${WEBHOOK_ID_TOKEN}/messages/${msg_id}") \
                 2>/dev/null || true
         fi
     fi
 
     # POST new message (saves ID + state)
-    post_status_message "$state" "$extra"
+    post_status_message "$state" "$extra" "$ef"
 }
 
 # PATCH an existing status message; self-heals on 404 by falling back to POST
 patch_status_message() {
     local state="$1"
     local extra="${2:-}"
+    local ef="${3:-[]}"
     local msg_id=$(read_status_msg_id)
 
     # No message to PATCH — self-heal by POSTing
     if [ -z "$msg_id" ]; then
-        post_status_message "$state" "$extra"
+        post_status_message "$state" "$extra" "$ef"
         return
     fi
 
-    local payload=$(build_status_payload "$state" "$extra")
+    local payload=$(build_status_payload "$state" "$extra" "$ef")
 
     if WEBHOOK_ID_TOKEN=$(extract_webhook_id_token "$CLAUDE_NOTIFY_WEBHOOK"); then
         for attempt in 1 2 3; do
@@ -225,7 +191,7 @@ patch_status_message() {
                 -X PATCH \
                 -H "Content-Type: application/json" \
                 -d "$payload" \
-                "https://discord.com/api/webhooks/${WEBHOOK_ID_TOKEN}/messages/${msg_id}" 2>/dev/null || true)
+                --config <(printf 'url = "%s"\n' "https://discord.com/api/webhooks/${WEBHOOK_ID_TOKEN}/messages/${msg_id}") 2>/dev/null || true)
 
             if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "204" ]; then
                 write_status_state "$state"
@@ -234,7 +200,7 @@ patch_status_message() {
 
             # 404 = message deleted externally — self-heal by POSTing
             if [ "$HTTP_CODE" = "404" ]; then
-                post_status_message "$state" "$extra"
+                post_status_message "$state" "$extra" "$ef"
                 return
             fi
 
@@ -291,13 +257,13 @@ if [ "$HOOK_EVENT" = "SubagentStart" ] || [ "$HOOK_EVENT" = "SubagentStop" ]; th
     if should_patch_subagent_update "$STATUS_STATE" "$NEW_COUNT"; then
         # idle_busy + all agents done → repost as plain idle (triggers ping)
         if [ "$STATUS_STATE" = "idle_busy" ] && [ "$NEW_COUNT" = "0" ]; then
-            repost_status_message "idle"
+            repost_status_message "idle" "" "$EXTRA_FIELDS"
         else
             # idle_busy needs subagent count passed as extra for the embed
             if [ "$STATUS_STATE" = "idle_busy" ]; then
-                patch_status_message "$STATUS_STATE" "$NEW_COUNT"
+                patch_status_message "$STATUS_STATE" "$NEW_COUNT" "$EXTRA_FIELDS"
             else
-                patch_status_message "$STATUS_STATE"
+                patch_status_message "$STATUS_STATE" "" "$EXTRA_FIELDS"
             fi
         fi
     fi
@@ -313,7 +279,7 @@ if [ "$HOOK_EVENT" = "SessionStart" ]; then
     if [ -n "$OLD_MSG_ID" ]; then
         if WEBHOOK_ID_TOKEN=$(extract_webhook_id_token "$CLAUDE_NOTIFY_WEBHOOK"); then
             curl -s -o /dev/null -X DELETE \
-                "https://discord.com/api/webhooks/${WEBHOOK_ID_TOKEN}/messages/${OLD_MSG_ID}" \
+                --config <(printf 'url = "%s"\n' "https://discord.com/api/webhooks/${WEBHOOK_ID_TOKEN}/messages/${OLD_MSG_ID}") \
                 2>/dev/null || true
         fi
     fi
@@ -333,7 +299,7 @@ if [ "$HOOK_EVENT" = "SessionStart" ]; then
     write_peak_subagents "0"
     write_bg_bash_count "0"
     write_peak_bg_bash "0"
-    post_status_message "online"
+    post_status_message "online" "" "$EXTRA_FIELDS"
 
     # Spawn heartbeat background process
     # Launch heartbeat (passes required env vars via export inheritance)
@@ -341,7 +307,7 @@ if [ "$HOOK_EVENT" = "SessionStart" ]; then
     export CLAUDE_NOTIFY_WEBHOOK CLAUDE_NOTIFY_HEARTBEAT_INTERVAL CLAUDE_NOTIFY_STALE_THRESHOLD
     export CLAUDE_NOTIFY_BOT_NAME CLAUDE_NOTIFY_ONLINE_COLOR CLAUDE_NOTIFY_OFFLINE_COLOR
     export CLAUDE_NOTIFY_APPROVAL_COLOR CLAUDE_NOTIFY_PERMISSION_COLOR
-    # Extra fields context for heartbeat embed refresh
+    # Extra fields context for heartbeat (build_extra_fields reads these via env)
     export SESSION_ID CWD PERMISSION_MODE
     export CLAUDE_NOTIFY_SHOW_SESSION_INFO CLAUDE_NOTIFY_SHOW_FULL_PATH
     nohup bash "$SCRIPT_DIR/lib/heartbeat.sh" "$PROJECT_NAME" </dev/null >/dev/null 2>&1 &
@@ -365,7 +331,7 @@ if [ "$HOOK_EVENT" = "SessionEnd" ]; then
 
     CURRENT_STATE=$(read_status_state)
     if [ -n "$CURRENT_STATE" ] && [ "$CURRENT_STATE" != "offline" ]; then
-        patch_status_message "offline"
+        patch_status_message "offline" "" "$EXTRA_FIELDS"
     fi
     clear_status_files "keep_msg_id"
     exit 0
@@ -397,21 +363,21 @@ if [ "$HOOK_EVENT" = "PostToolUse" ]; then
     fi
     CURRENT_STATE=$(read_status_state)
     case "$CURRENT_STATE" in
-        permission)     patch_status_message "approved" ;;
+        permission)     patch_status_message "approved" "" "$EXTRA_FIELDS" ;;
         idle|idle_busy)
             # Only transition to online if no subagents or bg bashes are running.
             # PostToolUse fires for subagent tool use too — don't let
             # subagent activity revert idle/idle_busy back to online.
             SUBS=$(read_subagent_count)
             [ "$SUBS" -gt 0 ] && exit 0
-            patch_status_message "online"
+            patch_status_message "online" "" "$EXTRA_FIELDS"
             ;;
-        approved)       patch_status_message "online" ;;
+        approved)       patch_status_message "online" "" "$EXTRA_FIELDS" ;;
         online)
             # Heartbeat: throttled PATCH with updated activity metrics
             if [ "${CLAUDE_NOTIFY_SHOW_ACTIVITY:-false}" = "true" ]; then
                 throttle_check "activity-${PROJECT_NAME}" "${CLAUDE_NOTIFY_ACTIVITY_THROTTLE:-30}" || exit 0
-                patch_status_message "online"
+                patch_status_message "online" "" "$EXTRA_FIELDS"
             fi
             exit 0
             ;;
@@ -448,12 +414,12 @@ case "$NOTIFICATION_TYPE" in
                 throttle_check "idle-busy-${PROJECT_NAME}" 15 || exit 0
                 safe_write_file "$LAST_COUNT_FILE" "$SUBAGENTS"
 
-                repost_status_message "idle_busy" "$SUBAGENTS"
+                repost_status_message "idle_busy" "$SUBAGENTS" "$EXTRA_FIELDS"
             else
                 # BG bashes only (no subagents) — show idle with bg bash info in status text
                 CURRENT_STATE=$(read_status_state)
                 [ "$CURRENT_STATE" = "idle" ] && exit 0
-                repost_status_message "idle"
+                repost_status_message "idle" "" "$EXTRA_FIELDS"
             fi
         else
             # Clear last count so next subagent session starts fresh
@@ -461,12 +427,12 @@ case "$NOTIFICATION_TYPE" in
             CURRENT_STATE=$(read_status_state)
             # Already idle — no-op
             [ "$CURRENT_STATE" = "idle" ] && exit 0
-            repost_status_message "idle"
+            repost_status_message "idle" "" "$EXTRA_FIELDS"
         fi
         ;;
 
     permission_prompt)
-        repost_status_message "permission" "${MESSAGE:-}"
+        repost_status_message "permission" "${MESSAGE:-}" "$EXTRA_FIELDS"
         ;;
 
     *)
