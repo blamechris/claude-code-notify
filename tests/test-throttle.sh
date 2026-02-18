@@ -26,12 +26,13 @@ assert_true "First call passes throttle" \
 assert_false "Immediate repeat is throttled" \
     throttle_check "test-event-alpha" 120
 
-# 3. After cooldown expires, call should pass again (use 1-second cooldown)
+# 3. After cooldown expires, call should pass again (manipulate timestamp directly)
 rm -f "$THROTTLE_DIR/last-test-event-expire"
-throttle_check "test-event-expire" 1
-sleep 1.1
+throttle_check "test-event-expire" 60
+# Backdate the lock file to 61 seconds ago (no sleep needed)
+printf '%s\n' "$(( $(date +%s) - 61 ))" > "$THROTTLE_DIR/last-test-event-expire"
 assert_true "Call passes after cooldown expires" \
-    throttle_check "test-event-expire" 1
+    throttle_check "test-event-expire" 60
 
 # 4. Different event types should have independent throttles
 rm -f "$THROTTLE_DIR/last-test-idle-projectA" "$THROTTLE_DIR/last-test-perm-projectA"
