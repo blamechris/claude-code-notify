@@ -94,8 +94,7 @@ assert_eq "Variable not in .env stays unset" "" "${TEST_VAR:-}"
 
 # 13. Invalid var name with shell metacharacters is rejected
 printf 'foo;rm=pwned\n' > "$NOTIFY_DIR/.env"
-load_env_var "foo;rm" || true
-assert_eq "Invalid var name 'foo;rm' rejected" "" "${foo_rm:-}"
+assert_false "Invalid var name 'foo;rm' rejected" load_env_var "foo;rm"
 
 # 14. Var name starting with digit is rejected (returns 1)
 printf '123BAD=oops\n' > "$NOTIFY_DIR/.env"
