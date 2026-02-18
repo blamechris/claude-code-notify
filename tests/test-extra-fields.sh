@@ -199,6 +199,50 @@ unset CLAUDE_NOTIFY_SHOW_SESSION_INFO CLAUDE_NOTIFY_SHOW_FULL_PATH CLAUDE_NOTIFY
 TOOL_NAME=""
 TOOL_INPUT=""
 
+# 20. Session + Path combination (no tool)
+export CLAUDE_NOTIFY_SHOW_SESSION_INFO="true"
+export CLAUDE_NOTIFY_SHOW_FULL_PATH="true"
+unset CLAUDE_NOTIFY_SHOW_TOOL_INFO 2>/dev/null || true
+SESSION_ID="abcdef1234567890"
+PERMISSION_MODE="default"
+CWD="/Users/test/Projects/my-project"
+TOOL_NAME=""
+TOOL_INPUT=""
+result=$(build_extra_fields)
+sp_count=$(echo "$result" | jq 'length')
+assert_eq "Session+Path combo produces 3 fields" "3" "$sp_count"
+sp_names=$(echo "$result" | jq -r '[.[].name] | sort | join(",")')
+assert_eq "Session+Path field names" "Path,Permission Mode,Session" "$sp_names"
+unset CLAUDE_NOTIFY_SHOW_SESSION_INFO CLAUDE_NOTIFY_SHOW_FULL_PATH
+
+# 21. Session + Tool combination (no path)
+export CLAUDE_NOTIFY_SHOW_SESSION_INFO="true"
+export CLAUDE_NOTIFY_SHOW_TOOL_INFO="true"
+unset CLAUDE_NOTIFY_SHOW_FULL_PATH 2>/dev/null || true
+TOOL_NAME="Bash"
+TOOL_INPUT='{"command":"echo hello"}'
+result=$(build_extra_fields)
+st_count=$(echo "$result" | jq 'length')
+assert_eq "Session+Tool combo produces 4 fields" "4" "$st_count"
+st_names=$(echo "$result" | jq -r '[.[].name] | sort | join(",")')
+assert_eq "Session+Tool field names" "Command,Permission Mode,Session,Tool" "$st_names"
+unset CLAUDE_NOTIFY_SHOW_SESSION_INFO CLAUDE_NOTIFY_SHOW_TOOL_INFO
+
+# 22. Path + Tool combination (no session)
+export CLAUDE_NOTIFY_SHOW_FULL_PATH="true"
+export CLAUDE_NOTIFY_SHOW_TOOL_INFO="true"
+unset CLAUDE_NOTIFY_SHOW_SESSION_INFO 2>/dev/null || true
+TOOL_NAME="Read"
+TOOL_INPUT='{"file_path":"/tmp/test.txt"}'
+result=$(build_extra_fields)
+pt_count=$(echo "$result" | jq 'length')
+assert_eq "Path+Tool combo produces 3 fields" "3" "$pt_count"
+pt_names=$(echo "$result" | jq -r '[.[].name] | sort | join(",")')
+assert_eq "Path+Tool field names" "Command,Path,Tool" "$pt_names"
+unset CLAUDE_NOTIFY_SHOW_FULL_PATH CLAUDE_NOTIFY_SHOW_TOOL_INFO
+TOOL_NAME=""
+TOOL_INPUT=""
+
 # -- Cleanup and summary --
 
 test_summary
