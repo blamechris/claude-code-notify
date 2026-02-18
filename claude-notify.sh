@@ -293,7 +293,9 @@ if [ "$HOOK_EVENT" = "SessionStart" ]; then
     HEARTBEAT_PID_FILE="$THROTTLE_DIR/heartbeat-pid-${PROJECT_NAME}"
     if [ -f "$HEARTBEAT_PID_FILE" ]; then
         OLD_HB_PID=$(cat "$HEARTBEAT_PID_FILE" 2>/dev/null || true)
-        if [ -n "$OLD_HB_PID" ] && kill -0 "$OLD_HB_PID" 2>/dev/null; then
+        # Verify PID is actually our heartbeat (guards against PID recycling)
+        if [ -n "$OLD_HB_PID" ] && kill -0 "$OLD_HB_PID" 2>/dev/null && \
+           ps -p "$OLD_HB_PID" -o command= 2>/dev/null | grep -q "heartbeat.sh"; then
             kill "$OLD_HB_PID" 2>/dev/null || true
         fi
     fi
@@ -326,7 +328,9 @@ if [ "$HOOK_EVENT" = "SessionEnd" ]; then
     HEARTBEAT_PID_FILE="$THROTTLE_DIR/heartbeat-pid-${PROJECT_NAME}"
     if [ -f "$HEARTBEAT_PID_FILE" ]; then
         HB_PID=$(cat "$HEARTBEAT_PID_FILE" 2>/dev/null || true)
-        if [ -n "$HB_PID" ] && kill -0 "$HB_PID" 2>/dev/null; then
+        # Verify PID is actually our heartbeat (guards against PID recycling)
+        if [ -n "$HB_PID" ] && kill -0 "$HB_PID" 2>/dev/null && \
+           ps -p "$HB_PID" -o command= 2>/dev/null | grep -q "heartbeat.sh"; then
             kill "$HB_PID" 2>/dev/null || true
         fi
         rm -f "$HEARTBEAT_PID_FILE"
@@ -366,6 +370,9 @@ if [ "$HOOK_EVENT" = "PostToolUse" ]; then
             fi
         fi
     fi
+    # Read state once then act — no locking needed because Claude Code hooks are
+    # invoked sequentially within a session. Concurrent sessions on the same project
+    # could theoretically race, but last-writer-wins and self-corrects on next event.
     CURRENT_STATE=$(read_status_state)
     case "$CURRENT_STATE" in
         permission)     patch_status_message "approved" "" "$EXTRA_FIELDS" ;;
