@@ -79,7 +79,7 @@ claude-code-notify/
 - Color values validated as numeric before use
 - Config dir `chmod 700`, .env file `chmod 600`
 - Subagent count updates use mkdir-based locking (portable, no flock)
-- Stdin read uses `read -t 5` timeout to prevent hanging
+- Stdin read uses `timeout 5 cat` to prevent hanging (falls back to `cat` on macOS)
 
 ## Development
 
