@@ -8,13 +8,22 @@ on:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - name: Install dependencies
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y jq curl
+          sudo apt-get install -y jq curl shellcheck
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install jq shellcheck
+      - name: Lint with shellcheck
+        run: shellcheck -e SC2155 -e SC2153 claude-notify.sh lib/*.sh install.sh
       - name: Run tests
         env:
           CI: true

@@ -40,6 +40,7 @@ if ! mkdir -p "$THROTTLE_DIR" 2>/dev/null || [ ! -d "$THROTTLE_DIR" ] || [ ! -w 
     echo "claude-notify: cannot create or write to $THROTTLE_DIR" >&2
     exit 1
 fi
+chmod 700 "$THROTTLE_DIR" 2>/dev/null || true
 
 # Load config from .env file (env vars take precedence)
 if [ -f "$NOTIFY_DIR/.env" ]; then
@@ -77,7 +78,7 @@ command -v jq &>/dev/null || { echo "claude-notify: jq is required (brew install
 
 # -- Parse hook input --
 
-INPUT=$(cat 2>/dev/null) || true
+INPUT=$(timeout 5 cat 2>/dev/null) || true
 
 # Validate JSON before parsing (catches malformed input early)
 if [ -n "$INPUT" ] && ! echo "$INPUT" | jq empty 2>/dev/null; then
@@ -146,27 +147,36 @@ build_extra_fields() {
 
 # -- POST / PATCH helpers --
 
-# POST a new status message, save message ID + state
+# POST a new status message, save message ID + state (retries on failure)
 post_status_message() {
     local state="$1"
     local extra="${2:-}"
     local payload=$(build_status_payload "$state" "$extra")
 
-    RESPONSE=$(curl -s -w "\n%{http_code}" \
-        -H "Content-Type: application/json" \
-        -d "$payload" \
-        "$CLAUDE_NOTIFY_WEBHOOK?wait=true" 2>/dev/null || true)
+    for attempt in 1 2 3; do
+        RESPONSE=$(curl -s -w "\n%{http_code}" \
+            -H "Content-Type: application/json" \
+            -d "$payload" \
+            "$CLAUDE_NOTIFY_WEBHOOK?wait=true" 2>/dev/null || true)
 
-    HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-    RESPONSE_BODY=$(echo "$RESPONSE" | sed '$d')
+        HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+        RESPONSE_BODY=$(echo "$RESPONSE" | sed '$d')
 
-    if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "204" ]; then
-        MESSAGE_ID=$(echo "$RESPONSE_BODY" | jq -r '.id // empty' 2>/dev/null)
-        if [ -n "$MESSAGE_ID" ]; then
-            write_status_msg_id "$MESSAGE_ID"
-            write_status_state "$state"
+        if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "204" ]; then
+            MESSAGE_ID=$(echo "$RESPONSE_BODY" | jq -r '.id // empty' 2>/dev/null)
+            if [ -n "$MESSAGE_ID" ]; then
+                write_status_msg_id "$MESSAGE_ID"
+                write_status_state "$state"
+            fi
+            return
         fi
-    fi
+
+        # Rate limited or server error — retry with backoff
+        if [ "$attempt" -lt 3 ]; then
+            sleep $(( attempt * attempt ))
+        fi
+    done
+    echo "claude-notify: warning: POST failed after 3 attempts (last HTTP $HTTP_CODE)" >&2
 }
 
 # DELETE old message + POST new one (moves to bottom of channel, triggers ping)

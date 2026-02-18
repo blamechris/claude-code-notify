@@ -29,6 +29,9 @@ load_env_var() {
     eval "[ -z \"\${${var_name}:-}\" ]" || return 0
     local val
     val=$(grep -m1 "^${var_name}=" "$NOTIFY_DIR/.env" 2>/dev/null | cut -d= -f2- || true)
+    # Strip surrounding quotes (double or single) — common .env convention
+    val="${val#\"}" ; val="${val%\"}"
+    val="${val#\'}" ; val="${val%\'}"
     if [ -n "$val" ]; then
         eval "${var_name}=\$val"
     fi
