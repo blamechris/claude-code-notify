@@ -128,7 +128,7 @@ safe_write_file() {
         fi
     else
         # mktemp or printf failed — fallback to direct write
-        rm -f "$tmp" 2>/dev/null || true
+        [ -n "${tmp:-}" ] && rm -f "$tmp" 2>/dev/null || true
         if ! printf '%s\n' "$content" > "$file" 2>/dev/null; then
             echo "claude-notify: warning: failed to write to $file" >&2
         fi
