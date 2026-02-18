@@ -295,7 +295,7 @@ if [ "$HOOK_EVENT" = "SessionStart" ]; then
         OLD_HB_PID=$(cat "$HEARTBEAT_PID_FILE" 2>/dev/null || true)
         # Verify PID is actually our heartbeat (guards against PID recycling)
         if [ -n "$OLD_HB_PID" ] && kill -0 "$OLD_HB_PID" 2>/dev/null && \
-           ps -p "$OLD_HB_PID" -o command= 2>/dev/null | grep -q "heartbeat.sh"; then
+           ps -p "$OLD_HB_PID" -o command= 2>/dev/null | grep -qF "lib/heartbeat.sh"; then
             kill "$OLD_HB_PID" 2>/dev/null || true
         fi
     fi
@@ -330,7 +330,7 @@ if [ "$HOOK_EVENT" = "SessionEnd" ]; then
         HB_PID=$(cat "$HEARTBEAT_PID_FILE" 2>/dev/null || true)
         # Verify PID is actually our heartbeat (guards against PID recycling)
         if [ -n "$HB_PID" ] && kill -0 "$HB_PID" 2>/dev/null && \
-           ps -p "$HB_PID" -o command= 2>/dev/null | grep -q "heartbeat.sh"; then
+           ps -p "$HB_PID" -o command= 2>/dev/null | grep -qF "lib/heartbeat.sh"; then
             kill "$HB_PID" 2>/dev/null || true
         fi
         rm -f "$HEARTBEAT_PID_FILE"
