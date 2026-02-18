@@ -41,16 +41,16 @@ assert_true "write_status_state sets last_state_change on transition" [ -n "$LAS
 assert_true "last_state_change is a recent timestamp" [ "$LAST_CHANGE" -gt 1000000000 ]
 
 # 3b. write_status_state does NOT update last_state_change on same-state write
-OLD_CHANGE="$LAST_CHANGE"
-sleep 1
+# Write a known old timestamp, then same-state write should NOT overwrite it
+write_last_state_change "1700000001"
 write_status_state "online"
 NEW_CHANGE=$(read_last_state_change)
-assert_eq "Same-state write does not update timestamp" "$OLD_CHANGE" "$NEW_CHANGE"
+assert_eq "Same-state write does not update timestamp" "1700000001" "$NEW_CHANGE"
 
 # 3c. write_status_state updates timestamp on actual transition
 write_status_state "idle"
 TRANSITION_CHANGE=$(read_last_state_change)
-assert_true "State transition updates timestamp" [ "$TRANSITION_CHANGE" -ge "$OLD_CHANGE" ]
+assert_true "State transition updates timestamp" [ "$TRANSITION_CHANGE" -gt 1700000001 ]
 
 # 4. clear_status_files removes last-state-change file
 write_last_state_change "1700000000"

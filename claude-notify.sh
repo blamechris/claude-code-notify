@@ -131,6 +131,7 @@ build_extra_fields() {
     fi
 
     # Tool info (for permissions)
+    # WARNING: commands may contain secrets (API keys, tokens). See README security considerations.
     if [ "${CLAUDE_NOTIFY_SHOW_TOOL_INFO:-false}" = "true" ] && [ -n "$TOOL_NAME" ]; then
         extra_fields=$(echo "$extra_fields" | jq -c --arg tool "$TOOL_NAME" '. + [{"name": "Tool", "value": $tool, "inline": true}]')
 

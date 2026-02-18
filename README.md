@@ -317,6 +317,17 @@ When `CLAUDE_NOTIFY_SHOW_ACTIVITY=true`, the online embed also shows **Tools Use
 
 State is stored in `/tmp/claude-notify/` (`status-msg-PROJECT`, `status-state-PROJECT`) and resets on reboot.
 
+## Security considerations
+
+**Tool info may expose secrets** (`CLAUDE_NOTIFY_SHOW_TOOL_INFO`): When enabled, tool commands and file paths are embedded in the Discord message. If Claude runs a command containing secrets (e.g., `curl -H "Authorization: Bearer sk-..."` or `export API_KEY=secret`), that text will be sent to Discord. This feature defaults to `false` — only enable it when you need diagnostic information and understand the risk.
+
+**Webhook URL visible in process listing**: The webhook URL (which contains a secret token) is passed as a command-line argument to `curl`, making it briefly visible via `ps aux` on shared systems. On single-user workstations this is a non-issue. On shared systems, be aware that any user could capture the URL during the brief execution window.
+
+**Mitigation for shared systems:**
+- Restrict read access to the config directory: `chmod 700 ~/.claude-notify` (the installer does this automatically)
+- Keep `CLAUDE_NOTIFY_SHOW_TOOL_INFO=false` (the default)
+- Rotate your Discord webhook URL if you suspect it's been compromised
+
 ## FAQ
 
 **Can I use this with Slack instead of Discord?**
