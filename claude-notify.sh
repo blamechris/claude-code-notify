@@ -258,8 +258,8 @@ if [ "$HOOK_EVENT" = "SubagentStart" ] || [ "$HOOK_EVENT" = "SubagentStop" ]; th
         fi
         LOCK_ATTEMPTS=$((LOCK_ATTEMPTS + 1))
         if [ "$LOCK_ATTEMPTS" -gt 100 ]; then
-            echo "claude-notify: warning: could not acquire subagent lock after 100 attempts, proceeding unlocked" >&2
-            break
+            echo "claude-notify: warning: could not acquire subagent lock after 100 attempts, skipping update" >&2
+            exit 0
         fi
         sleep 0.01
     done
