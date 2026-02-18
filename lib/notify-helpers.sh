@@ -26,6 +26,8 @@ _NOTIFY_HELPERS_LOADED=1
 # Load a variable from .env file if not already set via environment
 load_env_var() {
     local var_name="$1"
+    # Guard: only allow valid shell variable names (prevents eval injection)
+    [[ "$var_name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || return 1
     eval "[ -z \"\${${var_name}:-}\" ]" || return 0
     local val
     val=$(grep -m1 "^${var_name}=" "$NOTIFY_DIR/.env" 2>/dev/null | cut -d= -f2- || true)
@@ -97,6 +99,7 @@ extract_project_name() {
 # Format seconds into human-readable duration (e.g. "5m 30s", "1h 15m")
 format_duration() {
     local seconds="$1"
+    [[ "$seconds" =~ ^[0-9]+$ ]] || { echo "0s"; return; }
     if [ "$seconds" -lt 60 ]; then
         echo "${seconds}s"
     elif [ "$seconds" -lt 3600 ]; then
@@ -114,8 +117,21 @@ format_duration() {
 safe_write_file() {
     local file="$1"
     local content="$2"
-    if ! printf '%s\n' "$content" > "$file" 2>/dev/null; then
-        echo "claude-notify: warning: failed to write to $file" >&2
+    # Atomic write: temp file + mv (same dir = same filesystem = atomic rename)
+    local tmp
+    if tmp=$(mktemp "${file}.XXXXXX" 2>/dev/null) && printf '%s\n' "$content" > "$tmp" 2>/dev/null; then
+        if ! mv -f "$tmp" "$file" 2>/dev/null; then
+            rm -f "$tmp" 2>/dev/null || true
+            # Fallback to direct write
+            printf '%s\n' "$content" > "$file" 2>/dev/null || \
+                echo "claude-notify: warning: failed to write to $file" >&2
+        fi
+    else
+        # mktemp or printf failed — fallback to direct write
+        [ -n "${tmp:-}" ] && rm -f "$tmp" 2>/dev/null || true
+        if ! printf '%s\n' "$content" > "$file" 2>/dev/null; then
+            echo "claude-notify: warning: failed to write to $file" >&2
+        fi
     fi
     return 0
 }
@@ -269,8 +285,9 @@ get_project_color() {
 
     # Check for user overrides in config file
     if [ -f "$NOTIFY_DIR/colors.conf" ]; then
+        local escaped_project="${project//./\\.}"
         local color
-        color=$(grep -m1 "^${project}=" "$NOTIFY_DIR/colors.conf" 2>/dev/null | cut -d= -f2- || true)
+        color=$(grep -m1 "^${escaped_project}=" "$NOTIFY_DIR/colors.conf" 2>/dev/null | cut -d= -f2- || true)
         if [ -n "$color" ]; then
             if validate_color "$color"; then
                 echo "$color"
@@ -417,6 +434,14 @@ build_status_payload() {
             fi
             title="✅ ${PROJECT_NAME} — Permission Approved${stale_suffix}"
             local base=$(jq -c -n '[{"name": "Status", "value": "Permission granted, tool executed successfully", "inline": false}]')
+            local subs=$(read_subagent_count)
+            if [ "$subs" -gt 0 ] 2>/dev/null; then
+                base=$(echo "$base" | jq -c --arg v "$subs" '. + [{"name": "Subagents", "value": $v, "inline": true}]')
+            fi
+            local bg_bashes=$(read_bg_bash_count)
+            if [ "$bg_bashes" -gt 0 ] 2>/dev/null; then
+                base=$(echo "$base" | jq -c --arg v "$bg_bashes" '. + [{"name": "BG Bashes", "value": $v, "inline": true}]')
+            fi
             fields=$(jq -c -n --argjson base "$base" --argjson extra "$extra_fields" '$base + $extra')
             ;;
         offline)

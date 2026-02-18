@@ -23,8 +23,27 @@ PROJECT_NAME="${1:-}"
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 source "$SCRIPT_DIR/lib/notify-helpers.sh"
 
-# Stub build_extra_fields — heartbeat has no session-level context
-build_extra_fields() { echo "[]"; }
+# Build extra fields from inherited env vars (Session, Permission Mode, Path).
+# Deliberately omits Tool/Command — those are per-event context heartbeat doesn't have.
+build_extra_fields() {
+    local extra_fields="[]"
+
+    if [ "${CLAUDE_NOTIFY_SHOW_SESSION_INFO:-false}" = "true" ]; then
+        if [ -n "${SESSION_ID:-}" ]; then
+            local short_id="${SESSION_ID:0:8}"
+            extra_fields=$(echo "$extra_fields" | jq -c --arg id "$short_id" '. + [{"name": "Session", "value": $id, "inline": true}]')
+        fi
+        if [ -n "${PERMISSION_MODE:-}" ]; then
+            extra_fields=$(echo "$extra_fields" | jq -c --arg mode "$PERMISSION_MODE" '. + [{"name": "Permission Mode", "value": $mode, "inline": true}]')
+        fi
+    fi
+
+    if [ "${CLAUDE_NOTIFY_SHOW_FULL_PATH:-false}" = "true" ] && [ -n "${CWD:-}" ]; then
+        extra_fields=$(echo "$extra_fields" | jq -c --arg path "$CWD" '. + [{"name": "Path", "value": $path, "inline": false}]')
+    fi
+
+    echo "$extra_fields"
+}
 
 # PID file for cleanup
 PID_FILE="$THROTTLE_DIR/heartbeat-pid-${PROJECT_NAME}"
