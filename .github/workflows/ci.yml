@@ -23,7 +23,7 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install jq shellcheck
       - name: Lint with shellcheck
-        run: shellcheck -e SC2155 -e SC2153 -e SC2015 claude-notify.sh lib/*.sh install.sh
+        run: shellcheck claude-notify.sh lib/*.sh install.sh
       - name: Run tests
         env:
           CI: true
