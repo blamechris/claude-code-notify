@@ -111,9 +111,9 @@ for test_file in "$TESTS_DIR"/test-*.sh; do
     printf "[%s]\n" "$test_name"
 
     # Run in a subshell so each test gets a fresh environment.
-    # Capture output and exit code.
-    output=$(bash "$test_file" 2>&1)
-    rc=$?
+    # Capture output and exit code (|| true prevents set -e from killing runner).
+    rc=0
+    output=$(bash "$test_file" 2>&1) || rc=$?
 
     echo "$output"
 

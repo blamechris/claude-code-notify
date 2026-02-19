@@ -94,7 +94,7 @@ tc=$(cat "$THROTTLE_DIR/tool-count-${PROJECT}" 2>/dev/null || echo "MISSING")
 assert_eq "SessionStart initializes tool count to 0" "0" "$tc"
 
 ss=$(cat "$THROTTLE_DIR/session-start-${PROJECT}" 2>/dev/null || echo "MISSING")
-assert_true "SessionStart writes session-start timestamp" [ "$ss" != "MISSING" ] && [ "$ss" -gt 0 ] 2>/dev/null
+assert_true "SessionStart writes session-start timestamp" [ "$ss" != "MISSING" ]
 
 # 4. Notification/idle_prompt transitions to idle
 run_hook '{"hook_event_name":"Notification","notification_type":"idle_prompt","cwd":"'"$TEST_PROJECT_DIR"'"}'

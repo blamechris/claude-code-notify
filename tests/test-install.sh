@@ -44,11 +44,11 @@ env_content=$(cat "$INSTALL_CONFIG_DIR/.env" 2>/dev/null || true)
 assert_match ".env contains webhook URL" "CLAUDE_NOTIFY_WEBHOOK=https://discord.com/api/webhooks/123456/test-token" "$env_content"
 
 # 3. .env file permissions (600)
-env_perms=$(stat -f '%Lp' "$INSTALL_CONFIG_DIR/.env" 2>/dev/null || stat -c '%a' "$INSTALL_CONFIG_DIR/.env" 2>/dev/null)
+env_perms=$(stat -c '%a' "$INSTALL_CONFIG_DIR/.env" 2>/dev/null || stat -f '%Lp' "$INSTALL_CONFIG_DIR/.env" 2>/dev/null)
 assert_eq ".env has 600 permissions" "600" "$env_perms"
 
 # 4. Config dir permissions (700)
-dir_perms=$(stat -f '%Lp' "$INSTALL_CONFIG_DIR" 2>/dev/null || stat -c '%a' "$INSTALL_CONFIG_DIR" 2>/dev/null)
+dir_perms=$(stat -c '%a' "$INSTALL_CONFIG_DIR" 2>/dev/null || stat -f '%Lp' "$INSTALL_CONFIG_DIR" 2>/dev/null)
 assert_eq "Config dir has 700 permissions" "700" "$dir_perms"
 
 # 5. settings.json has hooks
