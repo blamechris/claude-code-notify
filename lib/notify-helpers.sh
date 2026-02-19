@@ -321,43 +321,54 @@ build_extra_fields() {
     local cwd="${3:-}"
     local tool_name="${4:-}"
     local tool_input="${5:-}"
-    local extra_fields="[]"
+    local show_session="${CLAUDE_NOTIFY_SHOW_SESSION_INFO:-false}"
+    local show_path="${CLAUDE_NOTIFY_SHOW_FULL_PATH:-false}"
+    local show_tool="${CLAUDE_NOTIFY_SHOW_TOOL_INFO:-false}"
 
-    # Session info (session ID, permission mode)
-    if [ "${CLAUDE_NOTIFY_SHOW_SESSION_INFO:-false}" = "true" ]; then
-        if [ -n "$session_id" ]; then
-            local short_id="${session_id:0:8}"
-            extra_fields=$(echo "$extra_fields" | jq -c --arg id "$short_id" '. + [{"name": "Session", "value": $id, "inline": true}]')
-        fi
-        if [ -n "$permission_mode" ]; then
-            extra_fields=$(echo "$extra_fields" | jq -c --arg mode "$permission_mode" '. + [{"name": "Permission Mode", "value": $mode, "inline": true}]')
-        fi
+    # Fast path: skip jq entirely when no optional fields are enabled
+    if [ "$show_session" != "true" ] && [ "$show_path" != "true" ] && [ "$show_tool" != "true" ]; then
+        echo "[]"
+        return
     fi
 
-    # Full path (instead of just project name)
-    if [ "${CLAUDE_NOTIFY_SHOW_FULL_PATH:-false}" = "true" ] && [ -n "$cwd" ]; then
-        extra_fields=$(echo "$extra_fields" | jq -c --arg path "$cwd" '. + [{"name": "Path", "value": $path, "inline": false}]')
-    fi
-
-    # Tool info (for permissions)
+    # Pre-process tool detail (needs separate jq for tool_input parsing)
     # WARNING: commands may contain secrets (API keys, tokens). See README security considerations.
-    if [ "${CLAUDE_NOTIFY_SHOW_TOOL_INFO:-false}" = "true" ] && [ -n "$tool_name" ]; then
-        extra_fields=$(echo "$extra_fields" | jq -c --arg tool "$tool_name" '. + [{"name": "Tool", "value": $tool, "inline": true}]')
-
-        # Tool input (truncated for safety)
-        if [ -n "$tool_input" ] && [ "$tool_input" != "null" ]; then
-            local raw_detail=$(echo "$tool_input" | jq -r 'if type == "object" then (.command // .file_path // "...") else . end' 2>/dev/null)
-            local tool_detail="$raw_detail"
-            if [ "${#raw_detail}" -gt 1000 ]; then
-                tool_detail="${raw_detail:0:997}..."
-            fi
-            if [ -n "$tool_detail" ] && [ "$tool_detail" != "null" ]; then
-                extra_fields=$(echo "$extra_fields" | jq -c --arg detail "$tool_detail" '. + [{"name": "Command", "value": $detail, "inline": false}]')
-            fi
+    local tool_detail=""
+    if [ "$show_tool" = "true" ] && [ -n "$tool_name" ] && [ -n "$tool_input" ] && [ "$tool_input" != "null" ]; then
+        tool_detail=$(echo "$tool_input" | jq -r 'if type == "object" then (.command // .file_path // "...") else . end' 2>/dev/null)
+        if [ "${#tool_detail}" -gt 1000 ]; then
+            tool_detail="${tool_detail:0:997}..."
         fi
+        [ "$tool_detail" = "null" ] && tool_detail=""
     fi
 
-    echo "$extra_fields"
+    # Build all fields in a single jq call (replaces up to 5 incremental jq calls)
+    jq -c -n \
+        --arg show_session "$show_session" \
+        --arg sid "${session_id:0:8}" \
+        --arg perm "$permission_mode" \
+        --arg show_path "$show_path" \
+        --arg cwd "$cwd" \
+        --arg show_tool "$show_tool" \
+        --arg tool "$tool_name" \
+        --arg detail "$tool_detail" \
+        '[
+            if $show_session == "true" and ($sid | length) > 0 then
+                {"name": "Session", "value": $sid, "inline": true}
+            else empty end,
+            if $show_session == "true" and ($perm | length) > 0 then
+                {"name": "Permission Mode", "value": $perm, "inline": true}
+            else empty end,
+            if $show_path == "true" and ($cwd | length) > 0 then
+                {"name": "Path", "value": $cwd, "inline": false}
+            else empty end,
+            if $show_tool == "true" and ($tool | length) > 0 then
+                {"name": "Tool", "value": $tool, "inline": true}
+            else empty end,
+            if $show_tool == "true" and ($tool | length) > 0 and ($detail | length) > 0 then
+                {"name": "Command", "value": $detail, "inline": false}
+            else empty end
+        ]'
 }
 
 # -- Build status payload --
@@ -406,32 +417,41 @@ build_status_payload() {
             title="🟢 ${PROJECT_NAME} — Session Online${stale_suffix}"
             local tc=$(read_tool_count)
             local bg_bashes=$(read_bg_bash_count)
+            local subs=$(read_subagent_count)
             if [ "${CLAUDE_NOTIFY_SHOW_ACTIVITY:-false}" = "true" ] && [ "$tc" -gt 0 ] 2>/dev/null; then
-                local base='[]'
-                base=$(echo "$base" | jq -c --arg v "$tc" '. + [{"name": "Tools Used", "value": $v, "inline": true}]')
                 local last_tool=$(read_last_tool)
-                if [ -n "$last_tool" ]; then
-                    base=$(echo "$base" | jq -c --arg v "$last_tool" '. + [{"name": "Last Tool", "value": $v, "inline": true}]')
-                fi
-                local subs=$(read_subagent_count)
-                if [ "$subs" -gt 0 ] 2>/dev/null; then
-                    base=$(echo "$base" | jq -c --arg v "$subs" '. + [{"name": "Subagents", "value": $v, "inline": true}]')
-                fi
-                if [ "$bg_bashes" -gt 0 ] 2>/dev/null; then
-                    base=$(echo "$base" | jq -c --arg v "$bg_bashes" '. + [{"name": "BG Bashes", "value": $v, "inline": true}]')
-                fi
-                fields=$(jq -c -n --argjson base "$base" --argjson extra "$extra_fields" '$base + $extra')
+                fields=$(jq -c -n \
+                    --arg tc "$tc" \
+                    --arg last_tool "${last_tool:-}" \
+                    --arg subs "${subs:-0}" \
+                    --arg bg "${bg_bashes:-0}" \
+                    --argjson ef "$extra_fields" \
+                    '[
+                        {"name": "Tools Used", "value": $tc, "inline": true},
+                        if ($last_tool | length) > 0 then
+                            {"name": "Last Tool", "value": $last_tool, "inline": true}
+                        else empty end,
+                        if ($subs | tonumber) > 0 then
+                            {"name": "Subagents", "value": $subs, "inline": true}
+                        else empty end,
+                        if ($bg | tonumber) > 0 then
+                            {"name": "BG Bashes", "value": $bg, "inline": true}
+                        else empty end
+                    ] + $ef')
             else
-                local base=$(jq -c -n '[{"name": "Status", "value": "Session started", "inline": false}]')
-                # Show subagent count even without activity tracking
-                local subs=$(read_subagent_count)
-                if [ "$subs" -gt 0 ] 2>/dev/null; then
-                    base=$(echo "$base" | jq -c --arg v "$subs" '. + [{"name": "Subagents", "value": $v, "inline": true}]')
-                fi
-                if [ "$bg_bashes" -gt 0 ] 2>/dev/null; then
-                    base=$(echo "$base" | jq -c --arg v "$bg_bashes" '. + [{"name": "BG Bashes", "value": $v, "inline": true}]')
-                fi
-                fields=$(jq -c -n --argjson base "$base" --argjson extra "$extra_fields" '$base + $extra')
+                fields=$(jq -c -n \
+                    --arg subs "${subs:-0}" \
+                    --arg bg "${bg_bashes:-0}" \
+                    --argjson ef "$extra_fields" \
+                    '[
+                        {"name": "Status", "value": "Session started", "inline": false},
+                        if ($subs | tonumber) > 0 then
+                            {"name": "Subagents", "value": $subs, "inline": true}
+                        else empty end,
+                        if ($bg | tonumber) > 0 then
+                            {"name": "BG Bashes", "value": $bg, "inline": true}
+                        else empty end
+                    ] + $ef')
             fi
             ;;
         idle)
@@ -444,23 +464,24 @@ build_status_payload() {
                 [ "$bg_bashes" -eq 1 ] && bg_label="bg bash launched"
                 status_text="Waiting for input (${bg_bashes} ${bg_label})"
             fi
-            local base=$(jq -c -n --arg v "$status_text" '[{"name": "Status", "value": $v, "inline": false}]')
-            fields=$(jq -c -n --argjson base "$base" --argjson extra "$extra_fields" '$base + $extra')
+            fields=$(jq -c -n --arg v "$status_text" --argjson ef "$extra_fields" \
+                '[{"name": "Status", "value": $v, "inline": false}] + $ef')
             ;;
         idle_busy)
             color=$(get_project_color "$PROJECT_NAME")
             title="🔄 ${PROJECT_NAME} — Idle${stale_suffix}"
             local bg_bashes=$(read_bg_bash_count)
-            local base=$(jq -c -n \
-                --arg subs "**${extra}** running" \
+            fields=$(jq -c -n \
+                --arg subs_text "**${extra}** running" \
+                --arg bg "${bg_bashes:-0}" \
+                --argjson ef "$extra_fields" \
                 '[
                     {"name": "Status", "value": "Main loop idle, waiting for subagents", "inline": false},
-                    {"name": "Subagents", "value": $subs, "inline": true}
-                ]')
-            if [ "$bg_bashes" -gt 0 ] 2>/dev/null; then
-                base=$(echo "$base" | jq -c --arg v "$bg_bashes" '. + [{"name": "BG Bashes", "value": $v, "inline": true}]')
-            fi
-            fields=$(jq -c -n --argjson base "$base" --argjson extra "$extra_fields" '$base + $extra')
+                    {"name": "Subagents", "value": $subs_text, "inline": true},
+                    if ($bg | tonumber) > 0 then
+                        {"name": "BG Bashes", "value": $bg, "inline": true}
+                    else empty end
+                ] + $ef')
             ;;
         permission)
             color="${CLAUDE_NOTIFY_PERMISSION_COLOR:-16753920}"
@@ -477,12 +498,10 @@ build_status_payload() {
                     detail="$extra"
                 fi
             fi
-            local base=$(jq -c -n \
-                --arg detail "$detail" \
-                'if $detail != "" then
+            fields=$(jq -c -n --arg detail "$detail" --argjson ef "$extra_fields" \
+                '(if $detail != "" then
                     [{"name": "Detail", "value": $detail, "inline": false}]
-                 else [] end')
-            fields=$(jq -c -n --argjson base "$base" --argjson extra "$extra_fields" '$base + $extra')
+                 else [] end) + $ef')
             ;;
         approved)
             color="${CLAUDE_NOTIFY_APPROVAL_COLOR:-3066993}"
@@ -491,16 +510,21 @@ build_status_payload() {
                 color="3066993"
             fi
             title="✅ ${PROJECT_NAME} — Permission Approved${stale_suffix}"
-            local base=$(jq -c -n '[{"name": "Status", "value": "Permission granted, tool executed successfully", "inline": false}]')
             local subs=$(read_subagent_count)
-            if [ "$subs" -gt 0 ] 2>/dev/null; then
-                base=$(echo "$base" | jq -c --arg v "$subs" '. + [{"name": "Subagents", "value": $v, "inline": true}]')
-            fi
             local bg_bashes=$(read_bg_bash_count)
-            if [ "$bg_bashes" -gt 0 ] 2>/dev/null; then
-                base=$(echo "$base" | jq -c --arg v "$bg_bashes" '. + [{"name": "BG Bashes", "value": $v, "inline": true}]')
-            fi
-            fields=$(jq -c -n --argjson base "$base" --argjson extra "$extra_fields" '$base + $extra')
+            fields=$(jq -c -n \
+                --arg subs "${subs:-0}" \
+                --arg bg "${bg_bashes:-0}" \
+                --argjson ef "$extra_fields" \
+                '[
+                    {"name": "Status", "value": "Permission granted, tool executed successfully", "inline": false},
+                    if ($subs | tonumber) > 0 then
+                        {"name": "Subagents", "value": $subs, "inline": true}
+                    else empty end,
+                    if ($bg | tonumber) > 0 then
+                        {"name": "BG Bashes", "value": $bg, "inline": true}
+                    else empty end
+                ] + $ef')
             ;;
         offline)
             color="${CLAUDE_NOTIFY_OFFLINE_COLOR:-15158332}"
@@ -509,29 +533,33 @@ build_status_payload() {
                 color="15158332"
             fi
             title="🔴 ${PROJECT_NAME} — Session Offline"
-            # Build summary fields with session metrics
-            local summary='[]'
             local tc=$(read_tool_count)
-            if [ "$tc" -gt 0 ] 2>/dev/null; then
-                summary=$(echo "$summary" | jq -c --arg v "$tc" '. + [{"name": "Tools Used", "value": $v, "inline": true}]')
-            fi
             local peak=$(read_peak_subagents)
-            if [ "$peak" -gt 0 ] 2>/dev/null; then
-                summary=$(echo "$summary" | jq -c --arg v "$peak" '. + [{"name": "Peak Subagents", "value": $v, "inline": true}]')
-            fi
             local peak_bg=$(read_peak_bg_bash)
-            if [ "$peak_bg" -gt 0 ] 2>/dev/null; then
-                summary=$(echo "$summary" | jq -c --arg v "$peak_bg" '. + [{"name": "Peak BG Bashes", "value": $v, "inline": true}]')
-            fi
-            fields=$(jq -c -n --argjson summary "$summary" --argjson extra "$extra_fields" '$summary + $extra')
+            fields=$(jq -c -n \
+                --arg tc "${tc:-0}" \
+                --arg peak "${peak:-0}" \
+                --arg peak_bg "${peak_bg:-0}" \
+                --argjson ef "$extra_fields" \
+                '[
+                    if ($tc | tonumber) > 0 then
+                        {"name": "Tools Used", "value": $tc, "inline": true}
+                    else empty end,
+                    if ($peak | tonumber) > 0 then
+                        {"name": "Peak Subagents", "value": $peak, "inline": true}
+                    else empty end,
+                    if ($peak_bg | tonumber) > 0 then
+                        {"name": "Peak BG Bashes", "value": $peak_bg, "inline": true}
+                    else empty end
+                ] + $ef')
             ;;
         *)
             echo "claude-notify: warning: unknown state '$state', defaulting to online" >&2
             color="${CLAUDE_NOTIFY_ONLINE_COLOR:-3066993}"
             if ! validate_color "$color"; then color="3066993"; fi
             title="🟢 ${PROJECT_NAME} — Session Online"
-            local base=$(jq -c -n '[{"name": "Status", "value": "Session started", "inline": false}]')
-            fields=$(jq -c -n --argjson base "$base" --argjson extra "$extra_fields" '$base + $extra')
+            fields=$(jq -c -n --argjson ef "$extra_fields" \
+                '[{"name": "Status", "value": "Session started", "inline": false}] + $ef')
             ;;
     esac
 

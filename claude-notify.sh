@@ -29,7 +29,7 @@ export PATH="/usr/local/bin:/opt/homebrew/bin:$PATH"
 # -- Configuration --
 
 NOTIFY_DIR="${CLAUDE_NOTIFY_DIR:-$HOME/.claude-notify}"
-THROTTLE_DIR="/tmp/claude-notify"
+THROTTLE_DIR="${CLAUDE_NOTIFY_THROTTLE_DIR:-/tmp/claude-notify}"
 
 # -- Source shared library (after NOTIFY_DIR/THROTTLE_DIR are set) --
 
@@ -127,9 +127,11 @@ post_status_message() {
     local extra="${2:-}"
     local ef="${3:-[]}"
     local payload=$(build_status_payload "$state" "$extra" "$ef")
+    local resp_headers retry_after
 
     for attempt in 1 2 3; do
-        RESPONSE=$(curl -s -w "\n%{http_code}" \
+        resp_headers=$(mktemp)
+        RESPONSE=$(curl -s -w "\n%{http_code}" -D "$resp_headers" \
             -H "Content-Type: application/json" \
             -d "$payload" \
             --config <(printf 'url = "%s"\n' "${CLAUDE_NOTIFY_WEBHOOK}?wait=true") 2>/dev/null || true)
@@ -138,6 +140,7 @@ post_status_message() {
         RESPONSE_BODY=$(echo "$RESPONSE" | sed '$d')
 
         if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "204" ]; then
+            rm -f "$resp_headers"
             MESSAGE_ID=$(echo "$RESPONSE_BODY" | jq -r '.id // empty' 2>/dev/null)
             if [ -n "$MESSAGE_ID" ]; then
                 write_status_msg_id "$MESSAGE_ID"
@@ -146,7 +149,18 @@ post_status_message() {
             return
         fi
 
-        # Rate limited or server error — retry with backoff
+        # 429: respect Discord's Retry-After header, then retry
+        if [ "$HTTP_CODE" = "429" ]; then
+            retry_after=$(grep -i '^retry-after:' "$resp_headers" 2>/dev/null | tr -d '[:space:]' | cut -d: -f2)
+            retry_after="${retry_after:-2}"
+            [[ "$retry_after" =~ ^[0-9]+\.?[0-9]*$ ]] || retry_after=2
+            rm -f "$resp_headers"
+            sleep "$retry_after"
+            continue
+        fi
+
+        rm -f "$resp_headers"
+        # Server error — retry with backoff
         if [ "$attempt" -lt 3 ]; then
             sleep $(( attempt * attempt ))
         fi
@@ -191,25 +205,40 @@ patch_status_message() {
     local payload=$(build_status_payload "$state" "$extra" "$ef")
 
     if WEBHOOK_ID_TOKEN=$(extract_webhook_id_token "$CLAUDE_NOTIFY_WEBHOOK"); then
+        local resp_headers retry_after
         for attempt in 1 2 3; do
-            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            resp_headers=$(mktemp)
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -D "$resp_headers" \
                 -X PATCH \
                 -H "Content-Type: application/json" \
                 -d "$payload" \
                 --config <(printf 'url = "%s"\n' "https://discord.com/api/webhooks/${WEBHOOK_ID_TOKEN}/messages/${msg_id}") 2>/dev/null || true)
 
             if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "204" ]; then
+                rm -f "$resp_headers"
                 write_status_state "$state"
                 return
             fi
 
             # 404 = message deleted externally — self-heal by POSTing
             if [ "$HTTP_CODE" = "404" ]; then
+                rm -f "$resp_headers"
                 post_status_message "$state" "$extra" "$ef"
                 return
             fi
 
-            # Rate limited or server error — retry with backoff
+            # 429: respect Discord's Retry-After header, then retry
+            if [ "$HTTP_CODE" = "429" ]; then
+                retry_after=$(grep -i '^retry-after:' "$resp_headers" 2>/dev/null | tr -d '[:space:]' | cut -d: -f2)
+                retry_after="${retry_after:-2}"
+                [[ "$retry_after" =~ ^[0-9]+\.?[0-9]*$ ]] || retry_after=2
+                rm -f "$resp_headers"
+                sleep "$retry_after"
+                continue
+            fi
+
+            rm -f "$resp_headers"
+            # Server error — retry with backoff
             if [ "$attempt" -lt 3 ]; then
                 sleep $(( attempt * attempt ))
             fi
