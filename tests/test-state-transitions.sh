@@ -214,7 +214,22 @@ should_patch_subagent_update "idle_busy" "1" || true
 RESULT=$(should_patch_subagent_update "idle_busy" "0" && echo "true" || echo "false")
 assert_eq "idle_busy count=0 bypasses throttle" "true" "$RESULT"
 
-# 13l. should_patch_subagent_update does NOT fire for idle state
+# 13l. idle_busy bypasses throttle even when recently set by online state
+# This is the exact race condition: SubagentStart fires when state=online
+# (setting the throttle), then state transitions to idle_busy, then another
+# SubagentStart fires — it must not be blocked by the earlier throttle.
+write_status_state "online"
+rm -f "$THROTTLE_DIR/last-subagent-${PROJECT}"
+should_patch_subagent_update "online" "1" || true  # sets throttle
+# Now call with idle_busy — should bypass throttle despite being within 10s
+RESULT=$(should_patch_subagent_update "idle_busy" "2" && echo "true" || echo "false")
+assert_eq "idle_busy bypasses throttle set by online" "true" "$RESULT"
+
+# 13m. idle_busy allows consecutive updates (no throttle between count changes)
+RESULT=$(should_patch_subagent_update "idle_busy" "3" && echo "true" || echo "false")
+assert_eq "idle_busy consecutive update not throttled" "true" "$RESULT"
+
+# 13n. should_patch_subagent_update does NOT fire for idle state (plain idle, not idle_busy)
 rm -f "$THROTTLE_DIR/last-subagent-${PROJECT}"
 write_status_state "idle"
 RESULT=$(should_patch_subagent_update "idle" "1" && echo "true" || echo "false")

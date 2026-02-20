@@ -245,6 +245,15 @@ write_peak_bg_bash() {
     safe_write_file "$THROTTLE_DIR/peak-bg-bash-${PROJECT_NAME}" "$1"
 }
 
+read_session_id() {
+    local file="$THROTTLE_DIR/session-id-${PROJECT_NAME}"
+    [ -f "$file" ] && cat "$file" 2>/dev/null || true
+}
+
+write_session_id() {
+    safe_write_file "$THROTTLE_DIR/session-id-${PROJECT_NAME}" "$1"
+}
+
 read_last_state_change() {
     local file="$THROTTLE_DIR/last-state-change-${PROJECT_NAME}"
     [ -f "$file" ] && cat "$file" 2>/dev/null || true
@@ -275,6 +284,7 @@ clear_status_files() {
     rm -f "$THROTTLE_DIR/peak-bg-bash-${PROJECT_NAME}" 2>/dev/null || true
     rm -f "$THROTTLE_DIR/last-state-change-${PROJECT_NAME}" 2>/dev/null || true
     rm -f "$THROTTLE_DIR/heartbeat-pid-${PROJECT_NAME}" 2>/dev/null || true
+    rm -f "$THROTTLE_DIR/session-id-${PROJECT_NAME}" 2>/dev/null || true
 }
 
 # -- Project colors (Discord embed sidebar, decimal RGB) --
@@ -595,6 +605,11 @@ should_patch_subagent_update() {
         online|idle_busy|approved)
             # Count reaching 0 = all agents done; always let it through
             if [ "$new_count" = "0" ]; then
+                return 0
+            fi
+            # idle_busy: subagent count is the primary embed content — always
+            # PATCH on change to avoid stale counts from throttle collisions
+            if [ "$state" = "idle_busy" ]; then
                 return 0
             fi
             throttle_check "subagent-${PROJECT_NAME}" 10

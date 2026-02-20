@@ -96,6 +96,22 @@ assert_eq "SessionStart initializes tool count to 0" "0" "$tc"
 ss=$(cat "$THROTTLE_DIR/session-start-${PROJECT}" 2>/dev/null || echo "MISSING")
 assert_true "SessionStart writes session-start timestamp" [ "$ss" != "MISSING" ]
 
+# 3b. SessionStart writes session ID for ownership tracking
+sid=$(cat "$THROTTLE_DIR/session-id-${PROJECT}" 2>/dev/null || echo "MISSING")
+assert_eq "SessionStart writes session ID" "abc123" "$sid"
+
+# 3c. SessionStart without session_id generates a fallback session ID
+clear_state
+run_hook '{"hook_event_name":"SessionStart","cwd":"'"$TEST_PROJECT_DIR"'"}'
+state=$(cat "$THROTTLE_DIR/status-state-${PROJECT}" 2>/dev/null || echo "MISSING")
+assert_eq "SessionStart without session_id still writes online state" "online" "$state"
+sid=$(cat "$THROTTLE_DIR/session-id-${PROJECT}" 2>/dev/null || echo "MISSING")
+assert_true "SessionStart without session_id generates fallback ID" [ "$sid" != "MISSING" ]
+
+# Restore session state for remaining tests
+clear_state
+run_hook '{"hook_event_name":"SessionStart","cwd":"'"$TEST_PROJECT_DIR"'","session_id":"abc-restored"}'
+
 # 4. Notification/idle_prompt transitions to idle
 run_hook '{"hook_event_name":"Notification","notification_type":"idle_prompt","cwd":"'"$TEST_PROJECT_DIR"'"}'
 state=$(cat "$THROTTLE_DIR/status-state-${PROJECT}" 2>/dev/null || echo "MISSING")
