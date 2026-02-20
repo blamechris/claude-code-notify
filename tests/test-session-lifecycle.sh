@@ -136,6 +136,37 @@ echo "idle" > "$THROTTLE_DIR/status-state-${PROJECT}"
 assert_eq "Status state overwrite works" "idle" "$(cat "$THROTTLE_DIR/status-state-${PROJECT}")"
 rm -f "$THROTTLE_DIR/status-msg-${PROJECT}" "$THROTTLE_DIR/status-state-${PROJECT}"
 
+# 9. Session ID tracking (ownership for heartbeat dedup)
+PROJECT_NAME="$PROJECT"
+write_session_id "sess-abc-123"
+assert_eq "write/read session ID round-trip" "sess-abc-123" "$(read_session_id)"
+
+# 10. Session ID is empty when no file exists
+rm -f "$THROTTLE_DIR/session-id-${PROJECT}"
+assert_eq "read_session_id default is empty" "" "$(read_session_id)"
+
+# 11. clear_status_files removes session ID
+write_session_id "sess-to-clear"
+write_status_msg_id "msg-for-clear"
+write_status_state "online"
+clear_status_files
+assert_false "Session ID file cleared" [ -f "$THROTTLE_DIR/session-id-${PROJECT}" ]
+
+# 12. clear_status_files with keep_msg_id also clears session ID
+write_session_id "sess-keep-test"
+write_status_msg_id "msg-keep-test"
+write_status_state "online"
+clear_status_files "keep_msg_id"
+assert_false "Session ID cleared with keep_msg_id" [ -f "$THROTTLE_DIR/session-id-${PROJECT}" ]
+assert_true "Msg ID preserved with keep_msg_id" [ -f "$THROTTLE_DIR/status-msg-${PROJECT}" ]
+rm -f "$THROTTLE_DIR/status-msg-${PROJECT}"
+
+# 13. Session ID overwrite (new session takes over)
+write_session_id "old-session"
+write_session_id "new-session"
+assert_eq "Session ID overwrite works" "new-session" "$(read_session_id)"
+rm -f "$THROTTLE_DIR/session-id-${PROJECT}"
+
 # -- Cleanup and summary --
 
 test_summary

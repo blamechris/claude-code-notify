@@ -331,6 +331,8 @@ if [ "$HOOK_EVENT" = "SessionStart" ]; then
 
     clear_status_files
     write_session_start "$(date +%s)"
+    # Write session ID for ownership tracking (heartbeat uses this to detect supersession)
+    [ -n "$SESSION_ID" ] && write_session_id "$SESSION_ID"
     write_tool_count "0"
     write_peak_subagents "0"
     write_bg_bash_count "0"

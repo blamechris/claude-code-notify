@@ -55,6 +55,13 @@ while true; do
         exit 0
     fi
 
+    # Check if a new session has superseded us (same project, different session ID)
+    STORED_SID=$(read_session_id)
+    MY_SID="${SESSION_ID:-}"
+    if [ -n "$STORED_SID" ] && [ -n "$MY_SID" ] && [ "$STORED_SID" != "$MY_SID" ]; then
+        exit 0
+    fi
+
     # Check if message ID exists (nothing to PATCH without it)
     MSG_ID=$(read_status_msg_id)
     [ -z "$MSG_ID" ] && continue
