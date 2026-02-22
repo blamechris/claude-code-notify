@@ -114,15 +114,14 @@ rm -f "$THROTTLE_DIR"/* 2>/dev/null || true
 run_hook '{"hook_event_name":"SessionStart","cwd":"'"$HOME"'","session_id":"home-test-1"}'
 assert_false "Home directory CWD produces no state files" has_state_files "$(basename "$HOME")"
 
-# -- Tests: normal paths should pass through --
+# -- Tests: normal paths should pass through (filter active, no bypass) --
 
 rm -f "$THROTTLE_DIR"/* 2>/dev/null || true
-NORMAL_DIR="$TEST_TMPDIR/my-real-project"
+NORMAL_DIR="$HOME/my-real-project-test-$$"
 mkdir -p "$NORMAL_DIR"
-export CLAUDE_NOTIFY_SKIP_TMP_FILTER=1
 run_hook '{"hook_event_name":"SessionStart","cwd":"'"$NORMAL_DIR"'","session_id":"normal-test-1"}'
-unset CLAUDE_NOTIFY_SKIP_TMP_FILTER
-assert_true "Normal CWD creates state files" has_state_files "my-real-project"
+assert_true "Normal CWD creates state files (filter active)" has_state_files "my-real-project-test-$$"
+rm -rf "$NORMAL_DIR"
 
 # -- Tests: CLAUDE_NOTIFY_SKIP_TMP_FILTER=1 bypasses filter --
 
