@@ -114,7 +114,8 @@ CWD=$(echo "$INPUT" | jq -r '.cwd // empty' 2>/dev/null)
 
 # Skip ephemeral/temp sessions (e.g. subagents spawned in /tmp, /private/tmp)
 # These clutter the channel with short-lived "tmp" entries.
-if [ -n "$CWD" ]; then
+# Bypassed in test mode (CLAUDE_NOTIFY_SKIP_TMP_FILTER=1) since tests use /tmp CWDs.
+if [ -n "$CWD" ] && [ "${CLAUDE_NOTIFY_SKIP_TMP_FILTER:-}" != "1" ]; then
     # Resolve symlinks (macOS: /tmp → /private/tmp) for consistent matching
     CWD_RESOLVED=$(cd "$CWD" 2>/dev/null && pwd -P || echo "$CWD")
     case "$CWD_RESOLVED" in
