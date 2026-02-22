@@ -127,7 +127,7 @@ if [ -n "$CWD" ] && [ "${CLAUDE_NOTIFY_SKIP_TMP_FILTER:-}" != "1" ]; then
             ;;
     esac
     # Skip sessions launched from home directory (basename = username, not a project)
-    if [ "$CWD_RESOLVED" = "$HOME" ]; then
+    if [ -n "${HOME:-}" ] && [ "$CWD_RESOLVED" = "$HOME" ]; then
         exit 0
     fi
 fi
