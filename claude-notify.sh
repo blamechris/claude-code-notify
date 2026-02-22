@@ -112,7 +112,7 @@ if [ -n "$CWD_RAW" ]; then
     # Resolve symlinks (macOS: /tmp → /private/tmp) for consistent matching
     CWD_RESOLVED=$(cd "$CWD_RAW" 2>/dev/null && pwd -P || echo "$CWD_RAW")
     case "$CWD_RESOLVED" in
-        /tmp|/tmp/*|/private/tmp|/private/tmp/*|/var/tmp|/var/tmp/*)
+        /tmp|/tmp/*|/private/tmp|/private/tmp/*|/var/tmp|/var/tmp/*|/private/var/tmp|/private/var/tmp/*)
             exit 0
             ;;
     esac
