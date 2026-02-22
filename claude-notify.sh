@@ -105,25 +105,24 @@ HOOK_EVENT=$(echo "$INPUT" | jq -r '.hook_event_name // empty' 2>/dev/null)
 # Extract project name early — needed by SubagentStart/Stop too
 PROJECT_NAME=$(extract_project_name "$INPUT")
 
-# Skip ephemeral/temp sessions (e.g. subagents spawned in /tmp, /private/tmp)
-# These clutter the channel with short-lived "tmp" entries.
-CWD_RAW=$(echo "$INPUT" | jq -r '.cwd // empty' 2>/dev/null)
-if [ -n "$CWD_RAW" ]; then
-    # Resolve symlinks (macOS: /tmp → /private/tmp) for consistent matching
-    CWD_RESOLVED=$(cd "$CWD_RAW" 2>/dev/null && pwd -P || echo "$CWD_RAW")
-    case "$CWD_RESOLVED" in
-        /tmp|/tmp/*|/private/tmp|/private/tmp/*|/var/tmp|/var/tmp/*|/private/var/tmp|/private/var/tmp/*)
-            exit 0
-            ;;
-    esac
-fi
-
 # Extract additional context fields (for optional display)
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
 PERMISSION_MODE=$(echo "$INPUT" | jq -r '.permission_mode // empty' 2>/dev/null)
 TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // empty' 2>/dev/null)
 TOOL_INPUT=$(echo "$INPUT" | jq -r '.tool_input // empty' 2>/dev/null)
 CWD=$(echo "$INPUT" | jq -r '.cwd // empty' 2>/dev/null)
+
+# Skip ephemeral/temp sessions (e.g. subagents spawned in /tmp, /private/tmp)
+# These clutter the channel with short-lived "tmp" entries.
+if [ -n "$CWD" ]; then
+    # Resolve symlinks (macOS: /tmp → /private/tmp) for consistent matching
+    CWD_RESOLVED=$(cd "$CWD" 2>/dev/null && pwd -P || echo "$CWD")
+    case "$CWD_RESOLVED" in
+        /tmp|/tmp/*|/private/tmp|/private/tmp/*|/var/tmp|/var/tmp/*|/private/var/tmp|/private/var/tmp/*)
+            exit 0
+            ;;
+    esac
+fi
 
 # Per-project subagent count file
 SUBAGENT_COUNT_FILE="$THROTTLE_DIR/subagent-count-${PROJECT_NAME}"
