@@ -114,6 +114,13 @@ rm -f "$THROTTLE_DIR"/* 2>/dev/null || true
 run_hook '{"hook_event_name":"SessionStart","cwd":"'"$HOME"'","session_id":"home-test-1"}'
 assert_false "Home directory CWD produces no state files" has_state_files "$(basename "$HOME")"
 
+rm -f "$THROTTLE_DIR"/* 2>/dev/null || true
+HOME_SUBDIR="$HOME/some-project-test-$$"
+mkdir -p "$HOME_SUBDIR"
+run_hook '{"hook_event_name":"SessionStart","cwd":"'"$HOME_SUBDIR"'","session_id":"home-subdir-test-1"}'
+assert_true "Home subdirectory CWD is NOT filtered" has_state_files "some-project-test-$$"
+rm -rf "$HOME_SUBDIR"
+
 # -- Tests: normal paths should pass through (filter active, no bypass) --
 
 rm -f "$THROTTLE_DIR"/* 2>/dev/null || true
