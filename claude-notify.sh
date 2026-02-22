@@ -112,6 +112,19 @@ TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // empty' 2>/dev/null)
 TOOL_INPUT=$(echo "$INPUT" | jq -r '.tool_input // empty' 2>/dev/null)
 CWD=$(echo "$INPUT" | jq -r '.cwd // empty' 2>/dev/null)
 
+# Skip ephemeral/temp sessions (e.g. subagents spawned in /tmp, /private/tmp)
+# These clutter the channel with short-lived "tmp" entries.
+# Bypassed in test mode (CLAUDE_NOTIFY_SKIP_TMP_FILTER=1) since tests use /tmp CWDs.
+if [ -n "$CWD" ] && [ "${CLAUDE_NOTIFY_SKIP_TMP_FILTER:-}" != "1" ]; then
+    # Resolve symlinks (macOS: /tmp → /private/tmp) for consistent matching
+    CWD_RESOLVED=$(cd "$CWD" 2>/dev/null && pwd -P || echo "$CWD")
+    case "$CWD_RESOLVED" in
+        /tmp|/tmp/*|/private/tmp|/private/tmp/*|/var/tmp|/var/tmp/*|/private/var/tmp|/private/var/tmp/*)
+            exit 0
+            ;;
+    esac
+fi
+
 # Per-project subagent count file
 SUBAGENT_COUNT_FILE="$THROTTLE_DIR/subagent-count-${PROJECT_NAME}"
 

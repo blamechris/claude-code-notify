@@ -60,6 +60,8 @@ export CLAUDE_NOTIFY_DIR="$NOTIFY_DIR"
 export CLAUDE_NOTIFY_WEBHOOK="https://discord.com/api/webhooks/123456789012345678/test-token-abc123"
 # Disable heartbeat to avoid background process interference
 export CLAUDE_NOTIFY_HEARTBEAT_INTERVAL=0
+# Bypass ephemeral /tmp filter (tests use /tmp-based CWDs)
+export CLAUDE_NOTIFY_SKIP_TMP_FILTER=1
 
 # Test project directory (outside any git repo so extract_project_name uses basename)
 TEST_PROJECT_DIR="$TEST_TMPDIR/test-integ-proj"
