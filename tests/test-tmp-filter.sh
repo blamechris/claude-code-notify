@@ -91,15 +91,19 @@ run_hook '{"hook_event_name":"SessionStart","cwd":"/var/tmp","session_id":"vtmp-
 assert_false "/var/tmp CWD produces no state files" has_state_files "tmp"
 
 # -- Tests: worktree agent paths should be filtered --
+# Use a non-tmp base dir so the /tmp/* case doesn't match first — this ensures
+# the */.claude/worktrees/agent-* pattern is the one doing the filtering.
+WT_BASE=$(mktemp -d "$HOME/.claude-notify-test-wt.XXXXXX")
+trap 'rm -rf "$WT_BASE"' EXIT
 
 rm -f "$THROTTLE_DIR"/* 2>/dev/null || true
-WORKTREE_DIR="$TEST_TMPDIR/fake-project/.claude/worktrees/agent-abc12345"
+WORKTREE_DIR="$WT_BASE/fake-project/.claude/worktrees/agent-abc12345"
 mkdir -p "$WORKTREE_DIR"
 run_hook '{"hook_event_name":"SessionStart","cwd":"'"$WORKTREE_DIR"'","session_id":"wt-test-1"}'
 assert_false "Worktree agent CWD produces no state files" has_state_files "agent-abc12345"
 
 rm -f "$THROTTLE_DIR"/* 2>/dev/null || true
-NESTED_WORKTREE="$TEST_TMPDIR/fake-project/.claude/worktrees/agent-aaa/.claude/worktrees/agent-bbb"
+NESTED_WORKTREE="$WT_BASE/fake-project/.claude/worktrees/agent-aaa/.claude/worktrees/agent-bbb"
 mkdir -p "$NESTED_WORKTREE"
 run_hook '{"hook_event_name":"SessionStart","cwd":"'"$NESTED_WORKTREE"'","session_id":"wt-test-2"}'
 assert_false "Nested worktree agent CWD produces no state files" has_state_files "agent-bbb"
