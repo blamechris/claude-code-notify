@@ -112,8 +112,8 @@ TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // empty' 2>/dev/null)
 TOOL_INPUT=$(echo "$INPUT" | jq -r '.tool_input // empty' 2>/dev/null)
 CWD=$(echo "$INPUT" | jq -r '.cwd // empty' 2>/dev/null)
 
-# Skip ephemeral sessions: temp dirs and Claude Code worktree subagents.
-# These clutter the channel with short-lived entries.
+# Skip non-project sessions: temp dirs, worktree subagents, home directory.
+# These clutter the channel with unhelpful entries.
 # Bypassed in test mode (CLAUDE_NOTIFY_SKIP_TMP_FILTER=1) since tests use /tmp CWDs.
 if [ -n "$CWD" ] && [ "${CLAUDE_NOTIFY_SKIP_TMP_FILTER:-}" != "1" ]; then
     # Resolve symlinks (macOS: /tmp → /private/tmp) for consistent matching
@@ -126,6 +126,10 @@ if [ -n "$CWD" ] && [ "${CLAUDE_NOTIFY_SKIP_TMP_FILTER:-}" != "1" ]; then
             exit 0
             ;;
     esac
+    # Skip sessions launched from home directory (basename = username, not a project)
+    if [ -n "${HOME:-}" ] && [ "$CWD_RESOLVED" = "$HOME" ]; then
+        exit 0
+    fi
 fi
 
 # Per-project subagent count file
