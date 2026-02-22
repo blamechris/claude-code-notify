@@ -1,8 +1,8 @@
 #!/bin/bash
 # test-tmp-filter.sh -- Tests for ephemeral session path filtering
 #
-# Verifies that sessions from /tmp, /private/tmp, /var/tmp, and
-# .claude/worktrees/agent-* paths are silently dropped (no state files).
+# Verifies that sessions from /tmp, /private/tmp, /var/tmp, and from
+# any paths containing .claude/worktrees/agent-* are silently dropped (no state files).
 # Also verifies that CLAUDE_NOTIFY_SKIP_TMP_FILTER=1 bypasses the filter.
 
 set -uo pipefail
@@ -78,6 +78,12 @@ rm -f "$THROTTLE_DIR"/* 2>/dev/null || true
 run_hook '{"hook_event_name":"SessionStart","cwd":"/private/tmp/deep/path","session_id":"ptmp-test-2"}'
 assert_false "/private/tmp/deep/path CWD produces no state files" has_state_files "path"
 
+# -- Tests: non-existent /tmp subdir should still be filtered (cd fallback) --
+
+rm -f "$THROTTLE_DIR"/* 2>/dev/null || true
+run_hook '{"hook_event_name":"SessionStart","cwd":"/tmp/nonexistent-dir-12345","session_id":"noexist-test-1"}'
+assert_false "Non-existent /tmp subdir still filtered" has_state_files "nonexistent"
+
 # -- Tests: /var/tmp paths should be filtered --
 
 rm -f "$THROTTLE_DIR"/* 2>/dev/null || true
@@ -98,12 +104,11 @@ mkdir -p "$NESTED_WORKTREE"
 run_hook '{"hook_event_name":"SessionStart","cwd":"'"$NESTED_WORKTREE"'","session_id":"wt-test-2"}'
 assert_false "Nested worktree agent CWD produces no state files" has_state_files "agent-bbb"
 
-# -- Tests: home directory should be filtered --
+# -- Tests: exact home directory ($HOME) should be filtered, but not its subdirectories --
 
 rm -f "$THROTTLE_DIR"/* 2>/dev/null || true
 run_hook '{"hook_event_name":"SessionStart","cwd":"'"$HOME"'","session_id":"home-test-1"}'
-USERNAME=$(basename "$HOME")
-assert_false "Home directory CWD produces no state files" has_state_files "$USERNAME"
+assert_false "Home directory CWD produces no state files" has_state_files "$(basename "$HOME")"
 
 # -- Tests: normal paths should pass through --
 
