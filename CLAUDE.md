@@ -31,6 +31,18 @@
 - **CRITICAL:** Never push directly to main without user's express permission
 - Always create PRs for features, even if you have bypass permissions
 
+**Merge Gate — MANDATORY short-circuit when merge is blocked:**
+
+When `gh pr merge` fails with "base branch policy prohibits the merge":
+1. **Do NOT investigate, reason about, or run diagnostic commands.** The cause is almost always unresolved review threads.
+2. **Immediately respond with exactly this** (filling in the PR number):
+   > Merge blocked — unresolved review threads. Please resolve them here:
+   > https://github.com/blamechris/claude-code-notify/pull/{N}/files
+   >
+   > Say "done" when resolved.
+3. **Wait for user confirmation**, then retry `gh pr merge --squash`.
+4. If it fails a second time, THEN check `gh pr checks` for CI failures.
+
 ## Project Structure
 
 ```

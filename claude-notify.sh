@@ -127,8 +127,12 @@ if [ -n "$CWD" ] && [ "${CLAUDE_NOTIFY_SKIP_TMP_FILTER:-}" != "1" ]; then
             ;;
     esac
     # Skip sessions launched from home directory (basename = username, not a project)
-    if [ -n "${HOME:-}" ] && [ "$CWD_RESOLVED" = "$HOME" ]; then
-        exit 0
+    # Compare against both raw $HOME and resolved $HOME (handles symlinked home dirs)
+    if [ -n "${HOME:-}" ]; then
+        HOME_RESOLVED=$(cd "$HOME" 2>/dev/null && pwd -P || echo "$HOME")
+        if [ "$CWD_RESOLVED" = "$HOME" ] || [ "$CWD_RESOLVED" = "$HOME_RESOLVED" ]; then
+            exit 0
+        fi
     fi
 fi
 

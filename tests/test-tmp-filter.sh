@@ -91,15 +91,19 @@ run_hook '{"hook_event_name":"SessionStart","cwd":"/var/tmp","session_id":"vtmp-
 assert_false "/var/tmp CWD produces no state files" has_state_files "tmp"
 
 # -- Tests: worktree agent paths should be filtered --
+# Use a non-tmp base dir so the /tmp/* case doesn't match first — this ensures
+# the */.claude/worktrees/agent-* pattern is the one doing the filtering.
+WT_BASE=$(mktemp -d "$HOME/.claude-notify-test-wt.XXXXXX")
+trap 'rm -rf "$WT_BASE"' EXIT
 
 rm -f "$THROTTLE_DIR"/* 2>/dev/null || true
-WORKTREE_DIR="$TEST_TMPDIR/fake-project/.claude/worktrees/agent-abc12345"
+WORKTREE_DIR="$WT_BASE/fake-project/.claude/worktrees/agent-abc12345"
 mkdir -p "$WORKTREE_DIR"
 run_hook '{"hook_event_name":"SessionStart","cwd":"'"$WORKTREE_DIR"'","session_id":"wt-test-1"}'
 assert_false "Worktree agent CWD produces no state files" has_state_files "agent-abc12345"
 
 rm -f "$THROTTLE_DIR"/* 2>/dev/null || true
-NESTED_WORKTREE="$TEST_TMPDIR/fake-project/.claude/worktrees/agent-aaa/.claude/worktrees/agent-bbb"
+NESTED_WORKTREE="$WT_BASE/fake-project/.claude/worktrees/agent-aaa/.claude/worktrees/agent-bbb"
 mkdir -p "$NESTED_WORKTREE"
 run_hook '{"hook_event_name":"SessionStart","cwd":"'"$NESTED_WORKTREE"'","session_id":"wt-test-2"}'
 assert_false "Nested worktree agent CWD produces no state files" has_state_files "agent-bbb"
@@ -110,15 +114,21 @@ rm -f "$THROTTLE_DIR"/* 2>/dev/null || true
 run_hook '{"hook_event_name":"SessionStart","cwd":"'"$HOME"'","session_id":"home-test-1"}'
 assert_false "Home directory CWD produces no state files" has_state_files "$(basename "$HOME")"
 
-# -- Tests: normal paths should pass through --
+rm -f "$THROTTLE_DIR"/* 2>/dev/null || true
+HOME_SUBDIR="$HOME/some-project-test-$$"
+mkdir -p "$HOME_SUBDIR"
+run_hook '{"hook_event_name":"SessionStart","cwd":"'"$HOME_SUBDIR"'","session_id":"home-subdir-test-1"}'
+assert_true "Home subdirectory CWD is NOT filtered" has_state_files "some-project-test-$$"
+rm -rf "$HOME_SUBDIR"
+
+# -- Tests: normal paths should pass through (filter active, no bypass) --
 
 rm -f "$THROTTLE_DIR"/* 2>/dev/null || true
-NORMAL_DIR="$TEST_TMPDIR/my-real-project"
+NORMAL_DIR="$HOME/my-real-project-test-$$"
 mkdir -p "$NORMAL_DIR"
-export CLAUDE_NOTIFY_SKIP_TMP_FILTER=1
 run_hook '{"hook_event_name":"SessionStart","cwd":"'"$NORMAL_DIR"'","session_id":"normal-test-1"}'
-unset CLAUDE_NOTIFY_SKIP_TMP_FILTER
-assert_true "Normal CWD creates state files" has_state_files "my-real-project"
+assert_true "Normal CWD creates state files (filter active)" has_state_files "my-real-project-test-$$"
+rm -rf "$NORMAL_DIR"
 
 # -- Tests: CLAUDE_NOTIFY_SKIP_TMP_FILTER=1 bypasses filter --
 
