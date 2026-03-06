@@ -12,7 +12,7 @@ Composes `/autonomous-dev-flow` logic internally but adds multi-wave retry with 
   - `#12 #15 #18` or `12 15 18` (specific issues by number)
   - `label:ready-to-build max:10 sort:created-asc` (with options)
   - If empty, auto-detect: scan open issues sorted by complexity (low first, then medium, skip high)
-  - Options: `max:N` (default 20, hard cap 30), `sort:created-asc` (default) or `sort:created-desc`
+  - Options: `max:N` — session-wide cap on distinct issues across all waves, including sub-issues from decomposition (default 20, hard cap 30). `sort:created-asc` (default) or `sort:created-desc`
   - `waves:N` (default 3, max 4) — maximum retry waves
   - `merge:true` — after the final wave, merge all eligible approved PRs via `gh pr merge --squash` (default: false)
 
@@ -379,7 +379,7 @@ This makes the skill **idempotent** — safe to re-run without duplicating work.
 7. **Escalate strategy across waves** — Wave 1: standard approach. Wave 2: fresh context + address failures. Wave 3: alternative approach + scope reduction. Don't repeat the same failing approach.
 8. **Converge, don't loop forever** — If a wave produces zero new completions, stop. Further waves won't help.
 9. **Progress table after every issue** — The user may check in at any time. The table must show wave context.
-10. **Respect the hard cap** — Max 30 issues across all waves (including sub-issues from decomposition). Refuse larger queues.
+10. **Respect the session-wide cap** — `max:N` (hard cap 30) limits distinct issues across all waves, including sub-issues from decomposition. Replenishment in Phase 2e must respect the remaining budget. Refuse queues exceeding the cap.
 11. **Resume from GitHub state** — No local state files. Detect wave progress from closed/open PR counts per issue.
 12. **Compose existing skills** — `/full-review` is called as-is. `gh pr merge --squash` for merge phase. Don't reinvent their logic.
 13. **Decompose in Wave 1 only** — High-complexity decomposition happens once. Retries work on the sub-issues, not the parent.
