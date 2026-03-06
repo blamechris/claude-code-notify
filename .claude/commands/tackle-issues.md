@@ -14,7 +14,7 @@ Composes `/autonomous-dev-flow` logic internally but adds multi-wave retry with 
   - If empty, auto-detect: scan open issues sorted by complexity (low first, then medium, skip high)
   - Options: `max:N` (default 20, hard cap 30), `sort:created-asc` (default) or `sort:created-desc`
   - `waves:N` (default 3, max 4) — maximum retry waves
-  - `merge:true` — run `/batch-merge all` after final wave (default: false)
+  - `merge:true` — after the final wave, merge all eligible approved PRs via `gh pr merge --squash` (default: false)
 
 ## Instructions
 
@@ -265,13 +265,13 @@ After each wave, check for convergence BEFORE entering the next wave:
 
 If `merge:true` was specified AND at least one PR is ready:
 
-1. List all PRs created during this session that have clean reviews
-2. Run `/batch-merge` with those PR numbers
+1. List all PRs created during this session that have clean reviews (approved, CI passing)
+2. For each eligible PR: `gh pr merge ${PR_NUM} --squash`
 3. Record merge results in the morning summary
 
 If `merge:true` was NOT specified, skip this phase and note in the summary:
 ```
-**Ready to merge:** Run `/batch-merge {PR_NUMS}` to merge completed PRs.
+**Ready to merge:** {PR_NUMS} — all approved with passing CI.
 ```
 
 ### Phase 6: Morning Summary
@@ -377,7 +377,7 @@ This makes the skill **idempotent** — safe to re-run without duplicating work.
 9. **Progress table after every issue** — The user may check in at any time. The table must show wave context.
 10. **Respect the hard cap** — Max 30 issues across all waves (including sub-issues from decomposition). Refuse larger queues.
 11. **Resume from GitHub state** — No local state files. Detect wave progress from closed/open PR counts per issue.
-12. **Compose existing skills** — `/full-review` is called as-is. `/batch-merge` if `merge:true`. Don't reinvent their logic.
+12. **Compose existing skills** — `/full-review` is called as-is. `gh pr merge --squash` for merge phase. Don't reinvent their logic.
 13. **Decompose in Wave 1 only** — High-complexity decomposition happens once. Retries work on the sub-issues, not the parent.
 14. **Comment on blocked issues** — Every issue that fails all waves gets a detailed GitHub comment with what was tried and why it failed.
 15. **Pre-Skill Checkpoint** — Re-read CLAUDE.md and skill files before running `/full-review` in every wave.
