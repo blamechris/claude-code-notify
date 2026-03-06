@@ -98,7 +98,7 @@ For each issue in the current wave's queue, run the full `/autonomous-dev-flow` 
 
 **Key differences from standalone `/autonomous-dev-flow`:**
 
-- **Two fix attempts per issue per wave** (same as original). If still failing after 2 attempts, mark as `retry` instead of just `flagged`.
+- **Two fix attempts per issue per wave** (same as original). If still failing after 2 attempts in the current wave, mark as `Flagged`. Between waves, all `Flagged` issues become retry candidates for the next wave.
 - **Track the failure reason** in `MASTER_LOG` — this informs the retry strategy in later waves.
 - **High-complexity decomposition** happens in Wave 1 only. Sub-issues created during decomposition are added to the current wave's queue (not deferred to Wave 2).
 
@@ -127,8 +127,8 @@ From `MASTER_LOG`, gather issues where the latest attempt was not `Done`:
 | Status | Meaning | Retry? |
 |--------|---------|--------|
 | Done | PR created, review clean | No — skip in future waves |
-| Retry | Tests failing or review found critical issues | Yes — re-attempt |
-| Flagged | 2 fix attempts failed in a wave | Yes — with different strategy |
+| Flagged | 2 fix attempts failed in current wave | Yes — retry in next wave with escalated strategy |
+| Blocked-auto | Failed all allowed waves | No — detailed comment posted on issue |
 | Skipped | Non-automatable (blocked, no criteria, etc.) | No — genuinely blocked |
 | Decomposed | Broken into sub-issues | No — sub-issues are in queue |
 
