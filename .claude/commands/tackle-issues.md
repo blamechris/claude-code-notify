@@ -159,18 +159,22 @@ Note merged PRs. If a merged PR's issue is in the retry queue, remove it — the
 
 #### 2d. Clean Up Failed Branches
 
-For issues entering Wave 2+, delete the stale branch and PR from the previous attempt:
+For issues entering Wave 2+, capture context from the failed attempt, then clean up:
 
 ```bash
 # For each retry candidate:
-# Close the old PR (it had issues)
+# 1. Capture the diff and review comments BEFORE cleanup (needed for retry strategy)
+OLD_DIFF=$(gh pr diff ${OLD_PR_NUM})
+OLD_REVIEWS=$(gh api repos/${REPO}/pulls/${OLD_PR_NUM}/comments --paginate)
+
+# 2. Close the old PR (it had issues)
 gh pr close ${OLD_PR_NUM} --comment "Closing for retry in Wave ${NEXT_WAVE} — previous attempt had: ${FAILURE_REASON}"
 
-# Delete the old remote branch
-git push origin --delete ${OLD_BRANCH}
+# 3. Delete the old remote branch
+git push origin --delete "${OLD_BRANCH}"
 ```
 
-This ensures each retry starts completely fresh — new branch from latest main, no stale code.
+This ensures each retry starts completely fresh — new branch from latest main, no stale code — while preserving the context needed for escalated retry strategies.
 
 #### 2e. Build Next Wave Queue
 
@@ -192,7 +196,7 @@ Each wave uses an escalating strategy for issues that failed in prior waves:
 For issues that failed in Wave 1:
 1. **Re-read the issue** completely — don't rely on Wave 1 understanding
 2. **Read the failed PR's review comments** — understand what went wrong
-3. **Read the diff from the failed attempt** (before branch deletion) to understand what was tried
+3. **Read the diff from the failed attempt** (captured in Phase 2d before branch deletion) to understand what was tried
 4. **Start fresh** — new branch from latest main, new implementation
 5. **Address the specific failure** — if tests failed, focus on why; if review found issues, incorporate feedback
 6. Same TDD cycle, same review process
