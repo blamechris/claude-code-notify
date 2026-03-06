@@ -440,6 +440,12 @@ if [ "$HOOK_EVENT" = "PostToolUse" ]; then
             # subagent activity revert idle/idle_busy back to online.
             SUBS=$(read_subagent_count)
             [ "$SUBS" -gt 0 ] && exit 0
+            # Skip transition when the Agent tool completes — the subagent just
+            # returned its result, so the main agent isn't doing new work yet.
+            # Without this guard, SubagentStop sets idle, then the Agent
+            # PostToolUse immediately reverts to online and no idle_prompt
+            # follows to correct it.
+            [ "$TOOL_NAME" = "Agent" ] && exit 0
             patch_status_message "online" "" "$EXTRA_FIELDS"
             ;;
         approved)       patch_status_message "online" "" "$EXTRA_FIELDS" ;;

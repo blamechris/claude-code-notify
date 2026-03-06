@@ -146,6 +146,14 @@ run_hook '{"hook_event_name":"PostToolUse","tool_name":"Bash","cwd":"'"$TEST_PRO
 state=$(cat "$THROTTLE_DIR/status-state-${PROJECT}" 2>/dev/null || echo "MISSING")
 assert_eq "PostToolUse after idle writes online" "online" "$state"
 
+# 9b. PostToolUse(Agent) after idle stays idle (subagent return, not real work)
+run_hook '{"hook_event_name":"Notification","notification_type":"idle_prompt","cwd":"'"$TEST_PROJECT_DIR"'"}'
+state=$(cat "$THROTTLE_DIR/status-state-${PROJECT}" 2>/dev/null || echo "")
+assert_eq "idle state set for Agent tool test" "idle" "$state"
+run_hook '{"hook_event_name":"PostToolUse","tool_name":"Agent","cwd":"'"$TEST_PROJECT_DIR"'"}'
+state=$(cat "$THROTTLE_DIR/status-state-${PROJECT}" 2>/dev/null || echo "MISSING")
+assert_eq "PostToolUse(Agent) after idle stays idle" "idle" "$state"
+
 # 10. SubagentStart increments count
 clear_state
 run_hook '{"hook_event_name":"SessionStart","cwd":"'"$TEST_PROJECT_DIR"'","session_id":"abc456"}'

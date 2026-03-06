@@ -21,36 +21,47 @@ PROJECT_NAME="$PROJECT"
 
 # -- Tests --
 
+# Helper: simulate PostToolUse idle/idle_busy guard pattern (mirrors production code)
+# Args: $1=TOOL_NAME
+posttool_idle_guard() {
+    local tool_name="${1:-Bash}"
+    SUBS=$(cat "$THROTTLE_DIR/subagent-count-${PROJECT}" 2>/dev/null || echo 0)
+    if [ "$SUBS" -gt 0 ]; then return; fi
+    if [ "$tool_name" = "Agent" ]; then return; fi
+    write_status_state "online"
+}
+
 # 1. PostToolUse with state=idle and 0 subagents → should transition to online
 write_status_state "idle"
 write_status_msg_id "msg-001"
 rm -f "$THROTTLE_DIR/subagent-count-${PROJECT}"
 CURRENT=$(read_status_state)
 assert_eq "Pre-condition: state is idle" "idle" "$CURRENT"
-# Simulate: PostToolUse handler — mirrors production guard pattern
-SUBS=$(cat "$THROTTLE_DIR/subagent-count-${PROJECT}" 2>/dev/null || echo 0)
-if [ "$SUBS" -gt 0 ]; then :; else write_status_state "online"; fi
+posttool_idle_guard "Bash"
 assert_eq "idle (0 subs) → online transition" "online" "$(read_status_state)"
+
+# 1b. PostToolUse(Agent) with state=idle and 0 subagents → stays idle
+write_status_state "idle"
+rm -f "$THROTTLE_DIR/subagent-count-${PROJECT}"
+posttool_idle_guard "Agent"
+assert_eq "idle (0 subs, Agent tool) stays idle" "idle" "$(read_status_state)"
 
 # 2. PostToolUse with state=idle_busy and 0 subagents → should transition to online
 write_status_state "idle_busy"
 echo "0" > "$THROTTLE_DIR/subagent-count-${PROJECT}"
-SUBS=$(cat "$THROTTLE_DIR/subagent-count-${PROJECT}" 2>/dev/null || echo 0)
-if [ "$SUBS" -gt 0 ]; then :; else write_status_state "online"; fi
+posttool_idle_guard "Bash"
 assert_eq "idle_busy (0 subs) → online transition" "online" "$(read_status_state)"
 
 # 2b. PostToolUse with state=idle_busy and subagents running → no-op
 write_status_state "idle_busy"
 echo "3" > "$THROTTLE_DIR/subagent-count-${PROJECT}"
-SUBS=$(cat "$THROTTLE_DIR/subagent-count-${PROJECT}" 2>/dev/null || echo 0)
-if [ "$SUBS" -gt 0 ]; then :; else write_status_state "online"; fi
+posttool_idle_guard "Bash"
 assert_eq "idle_busy (3 subs) stays idle_busy" "idle_busy" "$(read_status_state)"
 
 # 2c. PostToolUse with state=idle and subagents running → no-op
 write_status_state "idle"
 echo "2" > "$THROTTLE_DIR/subagent-count-${PROJECT}"
-SUBS=$(cat "$THROTTLE_DIR/subagent-count-${PROJECT}" 2>/dev/null || echo 0)
-if [ "$SUBS" -gt 0 ]; then :; else write_status_state "online"; fi
+posttool_idle_guard "Bash"
 assert_eq "idle (2 subs) stays idle" "idle" "$(read_status_state)"
 rm -f "$THROTTLE_DIR/subagent-count-${PROJECT}"
 
