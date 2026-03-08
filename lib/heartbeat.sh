@@ -32,7 +32,14 @@ cleanup() {
         rm -f "$PID_FILE" 2>/dev/null || true
     fi
 }
-trap cleanup EXIT TERM INT
+# TERM/INT must explicitly exit — trapping overrides the default terminate behavior,
+# so without exit the handler runs but the loop continues.
+terminate() {
+    cleanup
+    exit 0
+}
+trap cleanup EXIT
+trap terminate TERM INT
 
 # Write our PID (may already be written by caller, but ensure accuracy)
 safe_write_file "$PID_FILE" "$$"
