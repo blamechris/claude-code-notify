@@ -26,11 +26,20 @@ source "$SCRIPT_DIR/lib/notify-helpers.sh"
 # PID file for cleanup
 PID_FILE="$THROTTLE_DIR/heartbeat-pid-${PROJECT_NAME}"
 
-# Clean up PID file on exit
+# Clean up PID file on exit (only if it still contains our PID — avoids racing with newer heartbeats)
 cleanup() {
-    rm -f "$PID_FILE" 2>/dev/null || true
+    if [ -f "$PID_FILE" ] && [ "$(cat "$PID_FILE" 2>/dev/null)" = "$$" ]; then
+        rm -f "$PID_FILE" 2>/dev/null || true
+    fi
 }
-trap cleanup EXIT TERM INT
+# TERM/INT must explicitly exit — trapping overrides the default terminate behavior,
+# so without exit the handler runs but the loop continues.
+terminate() {
+    cleanup
+    exit 0
+}
+trap cleanup EXIT
+trap terminate TERM INT
 
 # Write our PID (may already be written by caller, but ensure accuracy)
 safe_write_file "$PID_FILE" "$$"
@@ -56,13 +65,16 @@ while true; do
     fi
 
     # Check if a new session has superseded us (same project, different session ID)
-    # Exit if: we have a session ID but the stored one is gone (cleared) or different
     STORED_SID=$(read_session_id)
     MY_SID="${SESSION_ID:-}"
     if [ -n "$MY_SID" ]; then
+        # Exit if stored ID is gone (cleared) or different from ours
         if [ -z "$STORED_SID" ] || [ "$STORED_SID" != "$MY_SID" ]; then
             exit 0
         fi
+    elif [ -n "$STORED_SID" ]; then
+        # We have no session ID (legacy heartbeat) but a new session wrote one — exit
+        exit 0
     fi
 
     # Check if message ID exists (nothing to PATCH without it)
