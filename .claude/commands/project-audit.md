@@ -17,10 +17,10 @@ Unlike `/swarm-audit` (which audits a specific document or topic), this skill au
 Examples:
 ```
 /project-audit
-/project-audit agents=8 focus=security,performance
-/project-audit output=audits/2024-q4 verbosity=detailed
-/project-audit agents=10 include=devops,dependencies
-/project-audit focus=testing skip=competitive
+/project-audit agents=8 focus=shell-safety,discord-compliance
+/project-audit output=audits/pre-release verbosity=detailed
+/project-audit agents=10 include=deployer,auditor
+/project-audit focus=testing skip=scout
 ```
 
 ## Instructions
@@ -88,23 +88,23 @@ Choose AGENT_COUNT agents. Always include all 5 core agents. Fill remaining slot
 
 | Agent | Nickname | Lens | Personality |
 |-------|----------|------|-------------|
-| Code Quality | "Craftsman" | Code standards, consistency, naming, error handling, anti-patterns, tech debt | Meticulous senior engineer who has maintained codebases for decades. Reads every line. Spots inconsistencies others miss. Cares deeply about readability and maintainability. |
-| Architecture | "Architect" | System design, modularity, coupling, cohesion, separation of concerns, scalability patterns | Principal engineer who designs systems for 10x growth. Evaluates whether the structure will hold as the project evolves. Identifies hidden coupling and missing abstractions. |
-| Security | "Sentinel" | Vulnerabilities, input validation, auth flows, secrets management, dependency CVEs, attack surface | Paranoid security engineer who assumes every input is hostile. Checks for injection, XSS, CSRF, path traversal, credential leaks, and insecure defaults. Cross-references dependencies against known CVEs. |
-| Testing | "Inspector" | Test coverage, test quality, edge cases, test architecture, CI reliability | QA architect who believes untested code is broken code. Evaluates not just coverage percentage but test quality — are the right things being tested? Are edge cases covered? Are tests brittle or robust? |
-| Feature Completeness | "Strategist" | Feature gaps, user journey completeness, error states, edge case handling, polish level | Product-minded engineer who thinks from the user's perspective. Identifies missing features, incomplete flows, poor error messages, and rough edges that hurt the user experience. |
+| Code Quality | "Craftsman" | Shell script safety (set -euo pipefail, quoting, input validation), jq correctness (--arg escaping, edge cases), error handling, anti-patterns, tech debt | Meticulous shell engineer who has debugged production hook scripts at 3am. Reads every line. Spots quoting errors, unvalidated inputs, and unsafe patterns others miss. Cares deeply about reliability and portability. |
+| Architecture | "Architect" | Hook script design, config hierarchy (env > .env > defaults), state management (/tmp ephemeral, ~/.claude-notify persistent), separation of concerns, Discord webhook integration patterns | Principal engineer who designs systems for reliability. Evaluates whether the hook event dispatch will scale across all Claude Code event types. Identifies hidden coupling between config, state, and transport layers. |
+| Security | "Sentinel" | Input validation (malformed JSON, missing fields), secrets management (webhook URLs, auth tokens), Discord API compliance, injection vulnerabilities (jq, curl), rate limiting, safe defaults | Paranoid security engineer who assumes every hook event is hostile. Checks for JSON injection, command injection via jq, credential leaks in logs, and insecure Discord webhook handling. |
+| Testing | "Inspector" | Test coverage (shell test suite), test quality, edge cases (malformed JSON, empty stdin, missing fields), hook event handling, CI reliability | QA architect who believes untested hook scripts are broken hook scripts. Evaluates whether all event types are tested, whether edge cases are covered, and whether the test suite catches real failures. |
+| Feature Completeness | "Strategist" | Hook event coverage (idle, permission, subagent, bg-bash, heartbeat), notification completeness, error states, edge case handling, polish level | Product-minded engineer who thinks from the Claude Code user's perspective. Identifies missing hook events, incomplete notification flows, poor error messages, and rough edges that hurt the developer experience. |
 
 #### Optional Roster (auto-selected based on project profile)
 
 | Agent | Nickname | Lens | Auto-Include When | Personality |
 |-------|----------|------|-------------------|-------------|
-| Performance | "Profiler" | Bottlenecks, memory leaks, N+1 queries, caching opportunities, bundle size, lazy loading | `performance_critical` OR `has_frontend` OR large project | Performance engineer who profiles everything. Finds N+1 queries, unnecessary re-renders, missing indexes, bloated bundles, and synchronous operations that should be async. |
-| UX/DX | "Advocate" | User experience (if frontend), developer experience (if library/tool), API ergonomics, error messages | `has_frontend` OR project is a library/CLI tool | Designer-developer hybrid who obsesses over the experience. For frontend: accessibility, responsiveness, loading states. For libraries: API intuitiveness, documentation clarity, error message helpfulness. |
-| DevOps/CI | "Deployer" | CI pipeline, deployment strategy, environment parity, monitoring, alerting, infrastructure as code | `has_ci` OR `has_docker` | SRE who has been paged at 3am too many times. Evaluates CI reliability, deployment safety (rollback?), environment consistency, log quality, and monitoring coverage. |
-| Documentation | "Chronicler" | README quality, API docs, inline comments, architecture decision records, onboarding experience | `has_docs` is false OR project is a library | Technical writer who judges documentation by whether a new team member can onboard in a day. Evaluates README completeness, API documentation, code comments, and whether architecture decisions are recorded. |
-| Dependency Health | "Auditor" | Outdated dependencies, CVEs, license compliance, dependency weight, vendoring strategy | `dependency_count` > 20 OR `security_surface` is high | Supply chain security expert who treats every dependency as a liability. Checks for outdated packages, known vulnerabilities, license conflicts, unnecessary dependencies, and whether the dependency tree is well-managed. |
-| Competitive Analysis | "Scout" | Industry standards, competing projects, missing table-stakes features, differentiation | Project is a product or library (not internal tooling) | Product strategist who knows the competitive landscape. Compares against similar projects and industry standards. Identifies table-stakes features that are missing and areas where the project could differentiate. |
-| API Design | "Contract" | API consistency, REST/GraphQL conventions, versioning, error formats, pagination, rate limiting | `has_api` | API design purist who has read every RFC. Evaluates endpoint naming, HTTP method usage, error response consistency, pagination patterns, versioning strategy, and whether the API is self-documenting. |
+| Performance | "Profiler" | Script execution speed (runs on every hook event), file I/O efficiency, subshell overhead, jq performance, curl connection reuse | Performance engineer who profiles every hook invocation. Finds unnecessary subshells, redundant file reads, and slow jq queries that add latency to the Claude Code event loop. |
+| UX/DX | "Advocate" | Developer experience (CLI ergonomics, config intuitiveness, error messages), hook event documentation, onboarding for new hook types | Designer-developer hybrid who obsesses over the experience. For this tool: config clarity, error message helpfulness, documentation of hook event types and payload schemas. |
+| DevOps/CI | "Deployer" | CI pipeline reliability, GitHub Actions workflow, deployment strategy, environment parity, monitoring, alerting | SRE who has been paged at 3am too many times. Evaluates CI reliability, whether the test suite catches real failures, and whether the deployment process is safe. |
+| Documentation | "Chronicler" | README quality, hook event documentation, jq/curl usage examples, architecture decision records, onboarding experience | Technical writer who judges documentation by whether a new contributor can add a hook event in an hour. Evaluates README completeness, hook event payload documentation, and code comments. |
+| Dependency Health | "Auditor" | System tool versions (jq, curl, bash), compatibility across platforms, version pinning, security advisories | Supply chain security expert who treats every system dependency as a liability. Checks for version compatibility, known vulnerabilities in jq/curl, and whether the tool works across different OS versions. |
+| Competitive Analysis | "Scout" | Industry standards for notification hooks, competing projects, missing table-stakes features, differentiation | Product strategist who knows the competitive landscape. Compares against similar Discord notification tools and identifies where this project could differentiate. |
+| API Design | "Contract" | Discord webhook API compliance, embed field limits, rate limiting, error response handling, payload schema consistency | API design purist who has read the Discord webhook docs. Evaluates whether payloads follow Discord conventions, whether rate limits are respected, and whether the webhook integration is robust. |
 
 #### Selection Algorithm
 
@@ -125,10 +125,10 @@ Choose AGENT_COUNT agents. Always include all 5 core agents. Fill remaining slot
 ### 4. Create Output Directory
 
 ```bash
-mkdir -p ${OUTPUT_DIR}
+mkdir -p "${OUTPUT_DIR}"
 ```
 
-If the directory already contains a previous audit, warn the user and ask whether to overwrite or create a timestamped subdirectory (e.g., `docs/project-audit/2024-12-15/`).
+If the directory already contains a previous audit, warn the user and ask whether to overwrite or create a timestamped subdirectory (e.g., `docs/project-audit/YYYY-MM-DD/`).
 
 ### 5. Launch Agent Swarm
 
@@ -198,7 +198,7 @@ Single rating X.X/5 with one-paragraph justification.
 
 ## Rules
 - READ actual source code. Verify everything against the codebase.
-- Be specific. "This might be a problem" is worthless. "src/auth.js:42 uses MD5 for password hashing" is useful.
+- Be specific. "This might be a problem" is worthless. "notify.sh:42 uses unquoted variable in jq filter" is useful.
 - Rate honestly. 3/5 means "adequate." 5/5 means "exemplary — I would showcase this." 1/5 means "actively harmful."
 - Be opinionated. Strong views, loosely held. Do not hedge everything.
 - Your recommendations must be actionable enough to become GitHub issues.
@@ -385,7 +385,7 @@ EOF
 Stage and commit all audit files:
 
 ```bash
-git add ${OUTPUT_DIR}/
+git add "${OUTPUT_DIR}/"
 git commit -m "docs: project audit (${AGENT_COUNT} agents, aggregate ${AGGREGATE_RATING}/5)
 
 Agents: ${AGENT_NICKNAMES_COMMA_SEPARATED}
@@ -486,11 +486,11 @@ Create `.claude/audit-config.json` to set defaults for this project:
 ```json
 {
   "default_agents": 8,
-  "default_focus": ["security", "performance"],
-  "default_verbosity": "detailed",
-  "always_include": ["devops", "dependencies"],
-  "always_skip": ["competitive"],
-  "output_dir": "docs/audits/"
+  "default_focus": ["shell-safety", "discord-compliance"],
+  "default_verbosity": "standard",
+  "always_include": ["deployer", "advocate"],
+  "always_skip": [],
+  "output_dir": "docs/project-audit/"
 }
 ```
 
@@ -499,9 +499,10 @@ Create `.claude/audit-config.json` to set defaults for this project:
 ```
 /project-audit
 /project-audit agents=8
-/project-audit focus=security
-/project-audit agents=10 focus=security,performance verbosity=detailed
+/project-audit focus=shell-safety
+/project-audit agents=10 focus=shell-safety,discord-compliance verbosity=detailed
 /project-audit output=audits/pre-launch agents=12
-/project-audit skip=competitive,documentation
-/project-audit include=devops verbosity=brief
+/project-audit skip=scout
+/project-audit include=deployer verbosity=brief
 ```
+<!-- skill-templates: project-audit b194666 2026-05-28 -->

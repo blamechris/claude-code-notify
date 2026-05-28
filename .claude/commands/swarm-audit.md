@@ -45,10 +45,13 @@ Choose AGENT_COUNT agents from this roster. Always include the first 4 (core pan
 |-------|----------|------|-----------------|
 | Operator | "Operator" | UX walkthrough, daily experience, error states, accessibility | Target involves user-facing features, UI, or interaction flows |
 | Futurist | "Futurist" | Extensibility, technical debt forecast, plugin architecture | Target involves architecture decisions with long-term implications |
-| Domain Expert | "Expert" | Deep domain knowledge for the specific technology | Target involves specific tech. Name the agent after the domain. |
+| Shell Expert | "Shell Expert" | Bash portability, POSIX compliance, ShellCheck rules, quoting safety | Target involves shell scripting or hook event handling |
 | Adversary | "Adversary" | Attack surface, abuse cases, security boundaries | Target involves auth, networking, data handling, or external interfaces |
 | Tester | "Tester" | Testability, edge cases, coverage gaps, test strategy | Target involves complex logic, state machines, or protocol design |
 | Historian | "Historian" | Precedent, prior art, industry patterns, what others have done | Target involves novel architecture or unconventional approaches |
+| Scout | "Scout" | Competitive landscape, feature parity, market positioning | Target involves product strategy or feature prioritization |
+| Deployer | "Deployer" | CI/CD reliability, deployment safety, rollback strategy, observability | Target involves CI workflows, deployment automation, or infrastructure |
+| Advocate | "Advocate" | Developer experience, CLI usability, documentation clarity, onboarding | Target involves CLI tools, hooks, or developer-facing APIs |
 
 ### 4. Launch Agent Swarm
 
@@ -182,6 +185,15 @@ Output a concise summary:
 | 2/5 | Concerning. Significant issues that may cause failures. |
 | 1/5 | Fundamentally broken. Needs rethinking, not patching. |
 
+### Project-Specific Grading Criteria
+
+For claude-code-notify (Bash/jq/Discord webhook project):
+
+- **Shell Expert** should weight: `set -euo pipefail` presence, proper variable quoting, ShellCheck compliance, POSIX portability, input validation safety
+- **Guardian** should weight: malformed JSON handling, missing Discord webhook fields, rate limit recovery, hook event loss scenarios, state file corruption
+- **Advocate** should weight: hook event documentation clarity, config hierarchy intuitiveness (env var > .env > defaults), error message usefulness, onboarding for new hook types
+- **Deployer** should weight: CI test coverage, GitHub Actions workflow reliability, script execution speed on every hook event, graceful degradation when Discord is unavailable
+
 ### Agent Behavior Rules
 
 - Agents MUST read actual source code, not just the target document
@@ -198,3 +210,4 @@ Output a concise summary:
 /swarm-audit docs/rfc-push-notifications.md
 /swarm-audit "session management across server restart" 6
 ```
+<!-- skill-templates: swarm-audit b194666 2026-05-28 -->
