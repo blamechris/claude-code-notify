@@ -48,7 +48,7 @@ Apply these rules **in order** (first match wins):
 #### 2a. IN_PROGRESS — Poll for Completion
 
 ```bash
-MAX_WAIT=180  # seconds (fast CI for small bash project)
+MAX_WAIT=120  # seconds
 INTERVAL=30
 ELAPSED=0
 
@@ -94,12 +94,11 @@ gh api repos/${REPO}/actions/runs/${RUN_ID}/jobs --jq '.jobs[] | select(.conclus
 
 **Pattern match against known failures:**
 
-Project-specific patterns:
-- `shellcheck` / `SC[0-9]+` → FIX (shell linting issue)
-- `jq: error` / `parse error` → FIX (JSON parsing issue)
-- `curl: (7)` / `Connection refused` → RETRIGGER (Discord webhook unreachable)
-- `test assertion failed` / `expected.*got` → FIX (test failure)
-- `permission denied.*\.sh` → FIX (script not executable)
+Shell scripting patterns:
+- `set -euo pipefail` violations → FIX (add/restore strict mode)
+- Unquoted variables → FIX (per ShellCheck: proper quoting)
+- jq escaping issues → FIX (per jq docs: use `--arg` for string interpolation, `--argjson` for non-strings)
+- Discord webhook API errors (rate limit, malformed embed) → FIX or ESCALATE (check embed field limits per Discord webhook docs)
 
 Generic patterns (apply to all repos):
 - `rate limit` / `API rate limit exceeded` → RETRIGGER (transient)
@@ -124,10 +123,6 @@ Classify each job into exactly ONE outcome:
 ```bash
 # Preferred: re-run only failed/cancelled jobs (fast, targeted)
 gh run rerun ${RUN_ID} --failed
-
-# Fallback: empty commit to retrigger
-# git commit --allow-empty -m "ci: retrigger"
-# git push
 ```
 
 **One retrigger attempt only.** If the re-run also fails, escalate instead of retrying.
@@ -172,7 +167,7 @@ Do NOT take automated action. Report the diagnosis to the user:
 After RETRIGGER or FIX, wait for the new run to complete:
 
 ```bash
-MAX_WAIT=180
+MAX_WAIT=120
 INTERVAL=30
 ELAPSED=0
 
@@ -268,4 +263,4 @@ Start
 6. **Composable** — Works standalone (`/fix-ci 42`) or from `/full-review` (Phase 2.5).
 7. **Idempotent** — Safe to re-run. If CI is already green, reports success and exits.
 8. **No attribution** — Follow project attribution policy in all commits.
-<!-- skill-templates: fix-ci 3768ea6 2026-03-01 -->
+<!-- skill-templates: fix-ci 9652481 2026-05-27 -->

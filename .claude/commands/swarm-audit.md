@@ -49,6 +49,9 @@ Choose AGENT_COUNT agents from this roster. Always include the first 4 (core pan
 | Adversary | "Adversary" | Attack surface, abuse cases, security boundaries | Target involves auth, networking, data handling, or external interfaces |
 | Tester | "Tester" | Testability, edge cases, coverage gaps, test strategy | Target involves complex logic, state machines, or protocol design |
 | Historian | "Historian" | Precedent, prior art, industry patterns, what others have done | Target involves novel architecture or unconventional approaches |
+| Scout | "Scout" | Competitive landscape, market positioning, feature parity | Target involves product strategy or feature prioritization |
+| Deployer | "Deployer" | CI/CD pipeline, deployment safety, rollback strategy, observability | Target involves infrastructure, automation, or release processes |
+| Advocate | "Advocate" | Developer experience, API ergonomics, documentation clarity, onboarding | Target involves CLI tools, hooks, or developer-facing interfaces |
 
 ### 4. Launch Agent Swarm
 
@@ -182,6 +185,28 @@ Output a concise summary:
 | 2/5 | Concerning. Significant issues that may cause failures. |
 | 1/5 | Fundamentally broken. Needs rethinking, not patching. |
 
+### Project-Specific Grading Criteria
+
+For claude-code-notify (Bash/jq/Discord webhook project):
+
+**Guardian** should weight:
+- Shell injection vectors (eval, unquoted variables, command substitution)
+- Discord webhook rate limits and retry logic
+- Malformed JSON handling and edge cases
+- State file permissions and race conditions
+
+**Builder** should weight:
+- POSIX compliance and portability across shells
+- jq escaping correctness (`--arg` vs `--argjson`)
+- Curl invocation safety and error handling
+- Hook event parsing robustness
+
+**Operator** should weight:
+- Hook script execution speed (runs on every event)
+- Error message clarity for debugging
+- Configuration discovery and defaults
+- Integration friction with Claude Code agent
+
 ### Agent Behavior Rules
 
 - Agents MUST read actual source code, not just the target document
@@ -194,7 +219,8 @@ Output a concise summary:
 
 ```
 /swarm-audit docs/architecture/proposal.md 8
-/swarm-audit "the WebSocket protocol in src/ws-server.js" 4
-/swarm-audit docs/rfc-push-notifications.md
-/swarm-audit "session management across server restart" 6
+/swarm-audit "the webhook event parsing in notify.sh" 4
+/swarm-audit docs/hook-events.md
+/swarm-audit "Discord rate limiting and retry strategy" 6
 ```
+<!-- skill-templates: swarm-audit 9652481 2026-05-27 -->

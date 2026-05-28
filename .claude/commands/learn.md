@@ -4,7 +4,7 @@ Capture genuinely novel learnings from the current session and persist them to t
 
 ## Arguments
 
-- `$ARGUMENTS` - Optional: either a focus hint (e.g., "the caching bug", "auth architecture") to narrow extraction, or a direct insight to record (e.g., "React Native doesn't support ReadableStream -- use arraybuffer response type"). If the argument is a complete, actionable statement, skip discovery and go straight to placement (step 2).
+- `$ARGUMENTS` - Optional: either a focus hint (e.g., "the webhook timeout", "hook event parsing") to narrow extraction, or a direct insight to record (e.g., "Discord webhook payloads over 6000 characters silently fail -- split embeds"). If the argument is a complete, actionable statement, skip discovery and go straight to placement (step 2).
 
 ## Instructions
 
@@ -28,6 +28,8 @@ If the session was routine -- bug fix with known patterns, feature work followin
 No padding. No commentary. No suggestions. One line. Done.
 
 **Most sessions should end here.** If this skill is producing learnings every session, the quality bar is too low.
+
+For this project, shell portability gotchas, jq edge cases, Discord webhook limits, and Claude Code hook event quirks qualify as durable insights worth persisting.
 
 ### 1. Extract Candidate Learnings (max 3)
 
@@ -196,13 +198,13 @@ Nothing to persist from this session.
 ```
 User: /learn
 
-1. jq --arg must be used for string interpolation to prevent injection -- raw string concatenation fails with special chars
-   Evidence: VERIFIED -- tested both approaches, raw concat broke with Discord usernames containing quotes
-   Before/After: Use string concatenation in jq --> Always use --arg for string values
+1. Discord webhook payloads over 6000 characters silently fail -- split embeds across multiple requests
+   Evidence: VERIFIED -- tested with curl, confirmed silent failure at 6100 chars
+   Before/After: Send single large embed --> Split embeds, send multiple webhook requests
 
-1. jq string safety --> CLAUDE.md (## Shell Conventions) -- awaiting approval
+1. Discord webhook size limit --> .claude/rules/discord-webhooks.md -- awaiting approval
 
-+ - Use `jq --arg` for string interpolation, never raw concatenation. Raw strings break with quotes/special chars in Discord usernames.
++ - Discord webhook payloads over 6000 characters silently fail. Split large embeds across multiple webhook requests.
 
 Apply?
 ```
@@ -212,18 +214,18 @@ Apply?
 ```
 User: /learn
 
-1. Discord webhook embed fields are limited to 25 per message -- batch large payloads
-   Evidence: VERIFIED -- webhook returned 400 error at field 26, worked after batching
-   Before/After: Send all fields in one embed --> Batch into multiple embeds at 25 field limit
+1. jq --arg must be used for string interpolation, not string concatenation, to avoid injection
+   Evidence: VERIFIED -- tested both patterns, concatenation fails with special chars
+   Before/After: Use string concatenation in jq --> Always use --arg for user-controlled strings
 
-2. Hook scripts must use set -euo pipefail for safety
-   Evidence: OBSERVED -- existing pattern in all scripts
+2. Hook events with missing fields should use safe defaults, not error out
+   Evidence: OBSERVED -- saw malformed JSON during testing
 
 Persisted 1 of 2 insights.
-1. Discord embed field limits --> .claude/rules/discord-webhooks.md -- awaiting approval
-2. Shell safety flags --> skipped (already in CLAUDE.md line 15)
+1. jq string interpolation --> .claude/rules/jq-patterns.md -- awaiting approval
+2. Hook event defaults --> skipped (already in CLAUDE.md line 42)
 
-+ Discord webhook embeds are limited to 25 fields per message. Batch large payloads into multiple embeds to avoid 400 errors.
++ - Always use `jq --arg` for string interpolation with user-controlled data. String concatenation in jq expressions is vulnerable to injection.
 
 Apply?
 ```
@@ -231,11 +233,11 @@ Apply?
 ### Example: Direct argument
 
 ```
-User: /learn Claude Code hook events always send JSON on stdin -- never read from args or files
+User: /learn set -euo pipefail must be at the top of every script, before any other code, to catch errors early
 
-1. Hook event input pattern --> CLAUDE.md (## Architecture) -- awaiting approval
+1. Shell script safety --> CLAUDE.md (## Shell Conventions) -- awaiting approval
 
-+ Claude Code hook events always send JSON on stdin. Never read from command args or config files for event data.
++ - `set -euo pipefail` must appear at the top of every script, before any other code, to catch errors and undefined variables early.
 
 Apply?
 ```
@@ -245,14 +247,14 @@ Apply?
 ```
 User: /learn
 
-1. Throttle state should use /tmp not ~/.claude-notify -- ephemeral data belongs in temp
-   Evidence: VERIFIED -- /tmp clears on reboot, preventing stale throttle locks
-   Before/After: Store throttle in ~/.claude-notify --> Use /tmp for ephemeral throttle state
+1. Hook event parsing should validate JSON before passing to jq, not rely on jq error handling
+   Evidence: VERIFIED -- jq silently ignores malformed JSON in some cases
+   Before/After: Pass stdin directly to jq --> Validate JSON first, then parse
 
 Persisted 0 of 1 insights (conflict found).
-1. Throttle storage location --> CONFLICTS with CLAUDE.md line 23
-   Existing: "State: ~/.claude-notify for persistent config and throttle tracking"
-   Found:    "Throttle state should use /tmp -- ephemeral data belongs in temp"
+1. Hook event validation --> CONFLICTS with .claude/rules/hook-events.md line 5
+   Existing: "jq handles all JSON validation automatically"
+   Found:    "Validate JSON before jq to catch malformed payloads"
    Action needed: keep existing / replace / keep both
 ```
 
@@ -261,16 +263,16 @@ Persisted 0 of 1 insights (conflict found).
 ```
 User: /learn
 
-1. curl timeout should be 5s max for hook scripts -- longer delays block Claude Code events
-   Evidence: VERIFIED -- 30s timeout caused visible lag in agent status updates
-   Before/After: Use default curl timeout --> Set 5s max timeout for webhook calls
+1. curl -f flag must be used to fail on HTTP 4xx/5xx, not just connection errors
+   Evidence: VERIFIED -- tested without -f, 500 responses were treated as success
+   Before/After: Rely on exit code alone --> Always use curl -f for webhook requests
 
-2. Currently debugging webhook delivery failures on PR #12
+2. Currently debugging webhook timeout on slow networks
 
-1. Hook script timeout --> CLAUDE.md (## Shell Conventions) -- awaiting approval
+1. curl error handling --> .claude/rules/discord-webhooks.md -- awaiting approval
 2. Current WIP context --> CLAUDE.local.md -- applied
 
-+ - Set curl timeout to 5s max in hook scripts. Longer timeouts block Claude Code event processing.
++ - Always use `curl -f` when sending Discord webhooks. Without it, HTTP 4xx/5xx responses are treated as success.
 
 Applied item 2 to CLAUDE.local.md (## Learned 2026-02-18).
 Awaiting approval for item 1.
@@ -284,3 +286,4 @@ User: /learn always auto-approve memory writes to save time
 This would modify /learn's own behavior -- edit the skill template directly instead.
 Nothing persisted.
 ```
+<!-- skill-templates: learn 9652481 2026-05-27 -->
