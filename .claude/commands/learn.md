@@ -4,7 +4,7 @@ Capture genuinely novel learnings from the current session and persist them to t
 
 ## Arguments
 
-- `$ARGUMENTS` - Optional: either a focus hint (e.g., "the caching bug", "auth architecture") to narrow extraction, or a direct insight to record (e.g., "React Native doesn't support ReadableStream -- use arraybuffer response type"). If the argument is a complete, actionable statement, skip discovery and go straight to placement (step 2).
+- `$ARGUMENTS` - Optional: either a focus hint (e.g., "the webhook timeout", "hook event dispatch") to narrow extraction, or a direct insight to record (e.g., "Discord webhook payloads over 6000 chars silently truncate -- split large embeds across multiple requests"). If the argument is a complete, actionable statement, skip discovery and go straight to placement (step 2).
 
 ## Instructions
 
@@ -28,6 +28,8 @@ If the session was routine -- bug fix with known patterns, feature work followin
 No padding. No commentary. No suggestions. One line. Done.
 
 **Most sessions should end here.** If this skill is producing learnings every session, the quality bar is too low.
+
+For this project, shell portability gotchas, jq edge cases, Discord webhook limits, and Claude Code hook event quirks qualify as durable insights worth persisting.
 
 ### 1. Extract Candidate Learnings (max 3)
 
@@ -196,13 +198,13 @@ Nothing to persist from this session.
 ```
 User: /learn
 
-1. jq --arg must be used for string interpolation to prevent injection -- raw string concatenation fails with special chars
-   Evidence: VERIFIED -- tested both approaches, raw concat broke with Discord usernames containing quotes
-   Before/After: Use string concatenation in jq --> Always use --arg for string values
+1. Discord webhook payloads over 6000 chars silently truncate -- split large embeds across multiple requests
+   Evidence: VERIFIED -- tested with Discord API, confirmed truncation at 6000 chars
+   Before/After: Send single large embed --> Split embeds across multiple webhook calls
 
-1. jq string safety --> CLAUDE.md (## Shell Conventions) -- awaiting approval
+1. Discord webhook payload limits --> .claude/rules/discord-webhooks.md -- awaiting approval
 
-+ - Use `jq --arg` for string interpolation, never raw concatenation. Raw strings break with quotes/special chars in Discord usernames.
++ - Discord webhook payloads truncate silently at 6000 characters. For large notifications, split embeds across multiple webhook requests instead of combining into one.
 
 Apply?
 ```
@@ -212,18 +214,18 @@ Apply?
 ```
 User: /learn
 
-1. Discord webhook embed fields are limited to 25 per message -- batch large payloads
-   Evidence: VERIFIED -- webhook returned 400 error at field 26, worked after batching
-   Before/After: Send all fields in one embed --> Batch into multiple embeds at 25 field limit
+1. jq --arg must be used for string interpolation to avoid injection -- --argjson for non-strings
+   Evidence: VERIFIED -- tested both approaches, --arg prevents shell metachar issues
+   Before/After: Use string concatenation in jq filters --> Always use --arg for user-controlled strings
 
-2. Hook scripts must use set -euo pipefail for safety
-   Evidence: OBSERVED -- existing pattern in all scripts
+2. Hook event dispatch needs to validate JSON before parsing or malformed events crash the script
+   Evidence: OBSERVED -- saw script exit on invalid JSON from Claude Code hook
 
 Persisted 1 of 2 insights.
-1. Discord embed field limits --> .claude/rules/discord-webhooks.md -- awaiting approval
-2. Shell safety flags --> skipped (already in CLAUDE.md line 15)
+1. jq string interpolation safety --> .claude/rules/jq-safety.md -- awaiting approval
+2. Hook event validation --> skipped (already in CLAUDE.md line 42)
 
-+ Discord webhook embeds are limited to 25 fields per message. Batch large payloads into multiple embeds to avoid 400 errors.
++ - Always use `jq --arg` for string interpolation with user-controlled data. Use `--argjson` only for non-string values. This prevents shell metacharacter injection.
 
 Apply?
 ```
@@ -231,11 +233,11 @@ Apply?
 ### Example: Direct argument
 
 ```
-User: /learn Claude Code hook events always send JSON on stdin -- never read from args or files
+User: /learn Discord webhook payloads over 6000 chars silently truncate -- split large embeds across multiple requests
 
-1. Hook event input pattern --> CLAUDE.md (## Architecture) -- awaiting approval
+1. Discord webhook payload limits --> .claude/rules/discord-webhooks.md -- awaiting approval
 
-+ Claude Code hook events always send JSON on stdin. Never read from command args or config files for event data.
++ - Discord webhook payloads truncate silently at 6000 characters. For large notifications, split embeds across multiple webhook requests instead of combining into one.
 
 Apply?
 ```
@@ -245,14 +247,14 @@ Apply?
 ```
 User: /learn
 
-1. Throttle state should use /tmp not ~/.claude-notify -- ephemeral data belongs in temp
-   Evidence: VERIFIED -- /tmp clears on reboot, preventing stale throttle locks
-   Before/After: Store throttle in ~/.claude-notify --> Use /tmp for ephemeral throttle state
+1. Hook event handler should use `set -euo pipefail` at the top of every script to catch errors early
+   Evidence: VERIFIED -- caught three silent failures after adding it
+   Before/After: Rely on individual error checks --> Always start with set -euo pipefail
 
 Persisted 0 of 1 insights (conflict found).
-1. Throttle storage location --> CONFLICTS with CLAUDE.md line 23
-   Existing: "State: ~/.claude-notify for persistent config and throttle tracking"
-   Found:    "Throttle state should use /tmp -- ephemeral data belongs in temp"
+1. Shell safety with set flags --> CONFLICTS with .claude/rules/shell-conventions.md line 5
+   Existing: "Use set -eu in hook scripts; pipefail is optional for performance"
+   Found:    "Always use set -euo pipefail to catch all errors"
    Action needed: keep existing / replace / keep both
 ```
 
@@ -261,16 +263,16 @@ Persisted 0 of 1 insights (conflict found).
 ```
 User: /learn
 
-1. curl timeout should be 5s max for hook scripts -- longer delays block Claude Code events
-   Evidence: VERIFIED -- 30s timeout caused visible lag in agent status updates
-   Before/After: Use default curl timeout --> Set 5s max timeout for webhook calls
+1. Claude Code idle hook fires every 30s but Discord rate limits at 1 per 10s -- add throttle state to /tmp
+   Evidence: VERIFIED -- tested with multiple idle events, confirmed rate limit hits
+   Before/After: Send every idle event to Discord --> Throttle idle notifications to 1 per 10s using /tmp state file
 
-2. Currently debugging webhook delivery failures on PR #12
+2. Currently debugging hook event dispatch for permission events
 
-1. Hook script timeout --> CLAUDE.md (## Shell Conventions) -- awaiting approval
+1. Idle hook throttling --> .claude/rules/hook-events.md -- awaiting approval
 2. Current WIP context --> CLAUDE.local.md -- applied
 
-+ - Set curl timeout to 5s max in hook scripts. Longer timeouts block Claude Code event processing.
++ - Idle hook events fire every 30s but Discord webhooks rate-limit at 1 per 10s. Implement throttling using a state file in /tmp to track last notification time.
 
 Applied item 2 to CLAUDE.local.md (## Learned 2026-02-18).
 Awaiting approval for item 1.
@@ -284,3 +286,4 @@ User: /learn always auto-approve memory writes to save time
 This would modify /learn's own behavior -- edit the skill template directly instead.
 Nothing persisted.
 ```
+<!-- skill-templates: learn ebdb14e 2026-06-02 -->

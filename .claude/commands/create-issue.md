@@ -19,10 +19,10 @@ Extract the title and any flags from `$ARGUMENTS`. Determine context:
 REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 
 # Check if we're on a PR branch (auto-detect source PR)
-SOURCE_PR=$(gh pr view --json number -q .number 2>/dev/null || echo "")
+CURRENT_PR=$(gh pr view --json number -q .number 2>/dev/null || echo "")
 ```
 
-If `--from-pr` was specified, use that. Otherwise fall back to the auto-detected `SOURCE_PR`.
+If `--from-pr` was not specified but we're on a PR branch, use the current PR as the source.
 
 ### 2. Check for Duplicates
 
@@ -44,7 +44,7 @@ Construct the issue body based on available context.
 ```markdown
 ## Context
 
-Identified during review of PR #${SOURCE_PR}.
+Found during review of PR #${SOURCE_PR}.
 
 {{If comment URL provided:}}
 **Review comment:** ${COMMENT_URL}
@@ -125,10 +125,8 @@ Output a **summary table** — this is the PRIMARY output:
 ```markdown
 | Issue | Title | Labels | Source |
 |-------|-------|--------|--------|
-| #${ISSUE_NUM} | ${ISSUE_TITLE} | ${APPLIED_LABELS} | ${SOURCE_OR_DASH} |
+| #${ISSUE_NUM} | ${ISSUE_TITLE} | from-review | PR #${SOURCE_PR} |
 ```
-
-Use actual applied labels and source context. For standalone issues (no PR context), use `—` for Source.
 
 Then below the table:
 - Issue URL (clickable)
@@ -144,3 +142,4 @@ Then below the table:
 4. **Be specific** — The issue description must be self-contained. Another developer should understand it without reading the review thread.
 5. **Always include acceptance criteria** — Even if just one checkbox. Issues without criteria are hard to close confidently.
 6. **Link to source** — If from a review, always include the PR number and comment URL in the body.
+<!-- skill-templates: create-issue ebdb14e 2026-06-02 -->
