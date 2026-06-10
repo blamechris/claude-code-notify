@@ -1,3 +1,10 @@
+> [!IMPORTANT]
+> **Archived — superseded by [chroxy](https://github.com/blamechris/chroxy).**
+> This tool has been folded into chroxy's notification pipeline: `@chroxy/claude-hooks`
+> (stateless hook emitters → `POST /api/events`) + `DiscordWebhookSink` (the status-embed
+> state machine, ported server-side). See [chroxy#5413](https://github.com/blamechris/chroxy/issues/5413)
+> for the design and migration notes. Install the replacement with `chroxy-hooks install`.
+
 # claude-code-notify
 
 Discord notifications for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) sessions.
