@@ -48,8 +48,8 @@ Apply these rules **in order** (first match wins):
 #### 2a. IN_PROGRESS — Poll for Completion
 
 ```bash
-MAX_WAIT=180  # seconds (fast CI for small bash project)
-INTERVAL=30
+MAX_WAIT=60  # seconds
+INTERVAL=10
 ELAPSED=0
 
 while [ $ELAPSED -lt $MAX_WAIT ]; do
@@ -94,12 +94,11 @@ gh api repos/${REPO}/actions/runs/${RUN_ID}/jobs --jq '.jobs[] | select(.conclus
 
 **Pattern match against known failures:**
 
-Project-specific patterns:
-- `shellcheck` / `SC[0-9]+` → FIX (shell linting issue)
-- `jq: error` / `parse error` → FIX (JSON parsing issue)
-- `curl: (7)` / `Connection refused` → RETRIGGER (Discord webhook unreachable)
-- `test assertion failed` / `expected.*got` → FIX (test failure)
-- `permission denied.*\.sh` → FIX (script not executable)
+Shell scripting patterns:
+- `set -euo pipefail` violations (unset variable, command failure not caught) → FIX
+- ShellCheck warnings (unquoted variables, globbing issues) → FIX
+- jq syntax errors or missing `--arg`/`--argjson` flags → FIX
+- Discord webhook API errors (rate limit, malformed payload) → ESCALATE if API-side, FIX if payload issue
 
 Generic patterns (apply to all repos):
 - `rate limit` / `API rate limit exceeded` → RETRIGGER (transient)
@@ -124,10 +123,6 @@ Classify each job into exactly ONE outcome:
 ```bash
 # Preferred: re-run only failed/cancelled jobs (fast, targeted)
 gh run rerun ${RUN_ID} --failed
-
-# Fallback: empty commit to retrigger
-# git commit --allow-empty -m "ci: retrigger"
-# git push
 ```
 
 **One retrigger attempt only.** If the re-run also fails, escalate instead of retrying.
@@ -172,8 +167,8 @@ Do NOT take automated action. Report the diagnosis to the user:
 After RETRIGGER or FIX, wait for the new run to complete:
 
 ```bash
-MAX_WAIT=180
-INTERVAL=30
+MAX_WAIT=60
+INTERVAL=10
 ELAPSED=0
 
 # Get the new run ID
@@ -267,5 +262,4 @@ Start
 5. **Minimal fix scope** — FIX actions should be surgical. Don't refactor code; just fix the CI failure.
 6. **Composable** — Works standalone (`/fix-ci 42`) or from `/full-review` (Phase 2.5).
 7. **Idempotent** — Safe to re-run. If CI is already green, reports success and exits.
-8. **No attribution** — Follow project attribution policy in all commits.
-<!-- skill-templates: fix-ci 3768ea6 2026-03-01 -->
+<!-- skill-templates: fix-ci b194666 2026-05-28 -->

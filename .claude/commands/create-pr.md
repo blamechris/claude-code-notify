@@ -41,9 +41,9 @@ echo "$BRANCH" | grep -oE '[0-9]+' | while read num; do
   gh issue view "$num" --json state,title -q 'select(.state == "OPEN") | "#\(.number // empty): \(.title // empty)"' 2>/dev/null
 done
 
-# Source 3: Open from-review issues — compare against changed files
+# Source 3: Open from-review issues whose title/body matches changed files
+CHANGED_FILES=$(git diff main --name-only | head -20)
 gh issue list --label "from-review" --state open --json number,title,body --limit 50
-git diff main --name-only
 ```
 
 **For each candidate issue:** Verify it's open and the PR's changes actually address it. Don't claim to close an issue the commits don't fix.
@@ -170,3 +170,4 @@ Then below the table:
 5. **Verify after creation** — Check that `closingIssuesReferences` matches expected issues.
 6. **Target main** — Always create PRs against `main` unless the user specifies otherwise.
 7. **Don't fabricate** — Only add `Closes #N` for issues the PR's changes actually address. If unsure, ask.
+<!-- skill-templates: create-pr b194666 2026-05-28 -->
