@@ -49,6 +49,9 @@ Choose AGENT_COUNT agents from this roster. Always include the first 4 (core pan
 | Adversary | "Adversary" | Attack surface, abuse cases, security boundaries | Target involves auth, networking, data handling, or external interfaces |
 | Tester | "Tester" | Testability, edge cases, coverage gaps, test strategy | Target involves complex logic, state machines, or protocol design |
 | Historian | "Historian" | Precedent, prior art, industry patterns, what others have done | Target involves novel architecture or unconventional approaches |
+| Shell Inspector | "Shell Inspector" | Shell safety (quoting, set -euo pipefail, input validation), portability, ShellCheck compliance | Target involves Bash scripts or shell utilities |
+| Discord Compliance | "Discord Compliance" | Discord webhook API limits, embed field constraints, rate limiting, payload validation | Target involves Discord webhook integration or event handling |
+| Hook Reliability | "Hook Reliability" | Hook event handling edge cases, malformed JSON, missing fields, event dispatch correctness | Target involves Claude Code hook events or notification dispatch |
 
 ### 4. Launch Agent Swarm
 
@@ -182,6 +185,27 @@ Output a concise summary:
 | 2/5 | Concerning. Significant issues that may cause failures. |
 | 1/5 | Fundamentally broken. Needs rethinking, not patching. |
 
+### Project-Specific Grading Criteria
+
+For claude-code-notify audits:
+
+**Shell Inspector** should weight:
+- Strict adherence to `set -euo pipefail` in all scripts
+- Proper variable quoting and jq escaping (`--arg` for strings, `--argjson` for non-strings)
+- Input validation with safe defaults (no eval/exec of user-controlled data)
+- POSIX portability and ShellCheck compliance
+
+**Discord Compliance** should weight:
+- Webhook payload validation against Discord API limits (embed field character limits, rate limiting)
+- Proper JSON escaping in curl requests
+- Webhook URL validation and error handling
+
+**Hook Reliability** should weight:
+- Correct parsing of Claude Code hook event JSON (idle, permission, subagent, bg-bash, heartbeat events)
+- Handling of malformed JSON, missing fields, and empty stdin
+- Event dispatch correctness and state consistency across hook invocations
+- Script execution speed (runs on every hook event — performance matters)
+
 ### Agent Behavior Rules
 
 - Agents MUST read actual source code, not just the target document
@@ -197,4 +221,7 @@ Output a concise summary:
 /swarm-audit "the WebSocket protocol in src/ws-server.js" 4
 /swarm-audit docs/rfc-push-notifications.md
 /swarm-audit "session management across server restart" 6
+/swarm-audit "notify.sh hook event dispatch" 6
+/swarm-audit "Discord webhook integration" 5
 ```
+<!-- skill-templates: swarm-audit ebdb14e 2026-06-02 -->

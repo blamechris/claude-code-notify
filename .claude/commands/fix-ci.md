@@ -48,8 +48,8 @@ Apply these rules **in order** (first match wins):
 #### 2a. IN_PROGRESS — Poll for Completion
 
 ```bash
-MAX_WAIT=180  # seconds (fast CI for small bash project)
-INTERVAL=30
+MAX_WAIT=60  # seconds
+INTERVAL=10
 ELAPSED=0
 
 while [ $ELAPSED -lt $MAX_WAIT ]; do
@@ -94,12 +94,12 @@ gh api repos/${REPO}/actions/runs/${RUN_ID}/jobs --jq '.jobs[] | select(.conclus
 
 **Pattern match against known failures:**
 
-Project-specific patterns:
-- `shellcheck` / `SC[0-9]+` → FIX (shell linting issue)
-- `jq: error` / `parse error` → FIX (JSON parsing issue)
-- `curl: (7)` / `Connection refused` → RETRIGGER (Discord webhook unreachable)
-- `test assertion failed` / `expected.*got` → FIX (test failure)
-- `permission denied.*\.sh` → FIX (script not executable)
+Shell-specific patterns:
+- `ShellCheck: SC[0-9]+` → FIX (quoting, set -euo pipefail, variable expansion issues)
+- `jq: parse error` / `jq: compile error` → FIX (jq syntax or --arg escaping)
+- `curl: (6|7|28)` (connection, timeout) → RETRIGGER (transient network)
+- `Discord webhook: 429` (rate limit) → RETRIGGER (transient)
+- `Discord webhook: 401/403` (auth) → ESCALATE (webhook URL or permissions)
 
 Generic patterns (apply to all repos):
 - `rate limit` / `API rate limit exceeded` → RETRIGGER (transient)
@@ -124,10 +124,6 @@ Classify each job into exactly ONE outcome:
 ```bash
 # Preferred: re-run only failed/cancelled jobs (fast, targeted)
 gh run rerun ${RUN_ID} --failed
-
-# Fallback: empty commit to retrigger
-# git commit --allow-empty -m "ci: retrigger"
-# git push
 ```
 
 **One retrigger attempt only.** If the re-run also fails, escalate instead of retrying.
@@ -172,12 +168,12 @@ Do NOT take automated action. Report the diagnosis to the user:
 After RETRIGGER or FIX, wait for the new run to complete:
 
 ```bash
-MAX_WAIT=180
-INTERVAL=30
+MAX_WAIT=60
+INTERVAL=10
 ELAPSED=0
 
 # Get the new run ID
-sleep 10  # brief delay for run to appear
+sleep 5  # brief delay for run to appear
 NEW_RUN_ID=$(gh run list --branch ${BRANCH} --workflow "CI" --limit 1 --json databaseId -q '.[0].databaseId')
 
 while [ $ELAPSED -lt $MAX_WAIT ]; do
@@ -268,4 +264,4 @@ Start
 6. **Composable** — Works standalone (`/fix-ci 42`) or from `/full-review` (Phase 2.5).
 7. **Idempotent** — Safe to re-run. If CI is already green, reports success and exits.
 8. **No attribution** — Follow project attribution policy in all commits.
-<!-- skill-templates: fix-ci 3768ea6 2026-03-01 -->
+<!-- skill-templates: fix-ci ebdb14e 2026-06-02 -->

@@ -18,9 +18,9 @@ Examples:
 ```
 /project-audit
 /project-audit agents=8 focus=security,performance
-/project-audit output=audits/2024-q4 verbosity=detailed
-/project-audit agents=10 include=devops,dependencies
-/project-audit focus=testing skip=competitive
+/project-audit output=audits/pre-release verbosity=detailed
+/project-audit agents=10 include=deployer,auditor
+/project-audit focus=testing skip=scout
 ```
 
 ## Instructions
@@ -125,10 +125,10 @@ Choose AGENT_COUNT agents. Always include all 5 core agents. Fill remaining slot
 ### 4. Create Output Directory
 
 ```bash
-mkdir -p ${OUTPUT_DIR}
+mkdir -p "${OUTPUT_DIR}"
 ```
 
-If the directory already contains a previous audit, warn the user and ask whether to overwrite or create a timestamped subdirectory (e.g., `docs/project-audit/2024-12-15/`).
+If the directory already contains a previous audit, warn the user and ask whether to overwrite or create a timestamped subdirectory (e.g., `docs/project-audit/YYYY-MM-DD/`).
 
 ### 5. Launch Agent Swarm
 
@@ -385,7 +385,7 @@ EOF
 Stage and commit all audit files:
 
 ```bash
-git add ${OUTPUT_DIR}/
+git add "${OUTPUT_DIR}/"
 git commit -m "docs: project audit (${AGENT_COUNT} agents, aggregate ${AGGREGATE_RATING}/5)
 
 Agents: ${AGENT_NICKNAMES_COMMA_SEPARATED}
@@ -441,6 +441,15 @@ Output a concise summary:
 | 2/5 | Concerning. Significant issues that will cause problems at scale. |
 | 1/5 | Fundamentally broken. Needs rethinking, not patching. |
 
+### Shell-Specific Grading Criteria
+
+For this Bash project, agents should weight:
+- **Shell Safety**: `set -euo pipefail` in all scripts, proper variable quoting, no eval/exec of user-controlled data
+- **jq Compliance**: Correct use of `--arg` for string interpolation, `--argjson` for non-strings, proper escaping
+- **Discord API Compliance**: Webhook event handling, embed field limits, rate limit awareness
+- **Hook Event Reliability**: Malformed JSON handling, missing field defaults, edge case coverage
+- **Script Performance**: Execution speed on every hook event, minimal file I/O, no unnecessary subshells
+
 ### Agent Behavior Rules
 
 - Agents MUST read actual source code — at least 5-10 files across different modules
@@ -488,8 +497,8 @@ Create `.claude/audit-config.json` to set defaults for this project:
   "default_agents": 8,
   "default_focus": ["security", "performance"],
   "default_verbosity": "detailed",
-  "always_include": ["devops", "dependencies"],
-  "always_skip": ["competitive"],
+  "always_include": ["deployer", "auditor"],
+  "always_skip": ["scout"],
   "output_dir": "docs/audits/"
 }
 ```
@@ -502,6 +511,7 @@ Create `.claude/audit-config.json` to set defaults for this project:
 /project-audit focus=security
 /project-audit agents=10 focus=security,performance verbosity=detailed
 /project-audit output=audits/pre-launch agents=12
-/project-audit skip=competitive,documentation
-/project-audit include=devops verbosity=brief
+/project-audit skip=scout,chronicler
+/project-audit include=deployer verbosity=brief
 ```
+<!-- skill-templates: project-audit ebdb14e 2026-06-02 -->
