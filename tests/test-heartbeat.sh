@@ -98,6 +98,31 @@ payload=$(build_status_payload "online")
 title=$(echo "$payload" | jq -r '.embeds[0].title')
 assert_false "Default threshold: recent state not stale" grep -q "stale?" <<< "$title"
 
+# -- Parent PID tracking tests --
+
+# 11. read/write parent_pid round-trip
+rm -f "$THROTTLE_DIR/parent-pid-${PROJECT_NAME}"
+assert_eq "read_parent_pid default is empty" "" "$(read_parent_pid)"
+
+write_parent_pid "12345"
+assert_eq "read_parent_pid reads written value" "12345" "$(read_parent_pid)"
+
+# 12. clear_status_files removes parent-pid file
+write_parent_pid "12345"
+clear_status_files
+assert_false "parent-pid file removed by clear" [ -f "$THROTTLE_DIR/parent-pid-${PROJECT_NAME}" ]
+
+# 13. Parent PID of current process is alive (kill -0 succeeds)
+write_parent_pid "$$"
+LIVE_PID=$(read_parent_pid)
+assert_true "Current PID is alive" kill -0 "$LIVE_PID"
+
+# 14. Dead parent PID is detected (kill -0 fails)
+# Use a PID that's almost certainly not running
+write_parent_pid "99999"
+DEAD_PID=$(read_parent_pid)
+assert_false "Dead PID is not alive" kill -0 "$DEAD_PID" 2>/dev/null
+
 # -- Cleanup and summary --
 
 test_summary

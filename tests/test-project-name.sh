@@ -50,6 +50,20 @@ assert_eq "Missing CWD → unknown" "unknown" "$result"
 result=$(extract_project_name "{\"cwd\": \"$TESTS_DIR\"}")
 assert_eq "Monorepo subdir resolves to repo root" "claude-code-notify" "$result"
 
+# 7. Worktree path resolves to parent project name
+WT_DIR="$HOME/some-project/.claude/worktrees/agent-abc123"
+mkdir -p "$WT_DIR"
+result=$(extract_project_name "{\"cwd\": \"$WT_DIR\"}")
+assert_eq "Worktree path resolves to parent project" "some-project" "$result"
+rm -rf "$HOME/some-project"
+
+# 8. Nested worktree resolves to outermost parent project
+NESTED_WT="$HOME/outer-proj/.claude/worktrees/agent-aaa/.claude/worktrees/agent-bbb"
+mkdir -p "$NESTED_WT"
+result=$(extract_project_name "{\"cwd\": \"$NESTED_WT\"}")
+assert_eq "Nested worktree resolves to outermost parent" "outer-proj" "$result"
+rm -rf "$HOME/outer-proj"
+
 # -- Cleanup and summary --
 
 test_summary

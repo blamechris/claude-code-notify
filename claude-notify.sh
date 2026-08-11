@@ -57,6 +57,8 @@ if [ -f "$NOTIFY_DIR/.env" ]; then
     load_env_var CLAUDE_NOTIFY_PERMISSION_COLOR
     load_env_var CLAUDE_NOTIFY_HEARTBEAT_INTERVAL
     load_env_var CLAUDE_NOTIFY_STALE_THRESHOLD
+    load_env_var DISCORD_BOT_TOKEN
+    load_env_var DISCORD_CHANNEL_ID
 fi
 
 # Check enabled state (file-based .disabled takes precedence over env var)
@@ -123,7 +125,13 @@ if [ -n "$CWD" ] && [ "${CLAUDE_NOTIFY_SKIP_TMP_FILTER:-}" != "1" ]; then
             exit 0
             ;;
         */.claude/worktrees/agent-*)
-            exit 0
+            # SubagentStart/SubagentStop must reach the counting code —
+            # worktree-isolated agents fire hooks with a worktree CWD, but their
+            # counts belong to the parent project (extract_project_name resolves
+            # worktree paths back to the parent project name).
+            if [ "$HOOK_EVENT" != "SubagentStart" ] && [ "$HOOK_EVENT" != "SubagentStop" ]; then
+                exit 0
+            fi
             ;;
     esac
     # Skip sessions launched from home directory (basename = username, not a project)
@@ -169,6 +177,8 @@ post_status_message() {
             if [ -n "$MESSAGE_ID" ]; then
                 write_status_msg_id "$MESSAGE_ID"
                 write_status_state "$state"
+            else
+                echo "claude-notify: warning: POST succeeded but could not extract message ID (orphaned message on Discord)" >&2
             fi
             return
         fi
@@ -200,13 +210,16 @@ repost_status_message() {
     local ef="${3:-[]}"
     local msg_id=$(read_status_msg_id)
 
-    # Delete old message if it exists
+    # Delete old message if it exists, then clear the stale msg ID.
+    # Clearing before POST ensures that if POST fails, the system knows
+    # there's no tracked message and will self-heal via POST on next event.
     if [ -n "$msg_id" ]; then
         if WEBHOOK_ID_TOKEN=$(extract_webhook_id_token "$CLAUDE_NOTIFY_WEBHOOK"); then
             curl -s -o /dev/null -X DELETE \
                 --config <(printf 'url = "%s"\n' "https://discord.com/api/webhooks/${WEBHOOK_ID_TOKEN}/messages/${msg_id}") \
                 2>/dev/null || true
         fi
+        rm -f "$THROTTLE_DIR/status-msg-${PROJECT_NAME}" 2>/dev/null || true
     fi
 
     # POST new message (saves ID + state)
@@ -214,15 +227,20 @@ repost_status_message() {
 }
 
 # PATCH an existing status message; self-heals on 404 by falling back to POST
+# Pass "no_post_on_404" as $4 to skip the POST fallback (used by SessionEnd —
+# if the message is already gone, creating a new offline message is wasteful)
 patch_status_message() {
     local state="$1"
     local extra="${2:-}"
     local ef="${3:-[]}"
+    local no_post_on_404="${4:-}"
     local msg_id=$(read_status_msg_id)
 
-    # No message to PATCH — self-heal by POSTing
+    # No message to PATCH — self-heal by POSTing (unless suppressed)
     if [ -z "$msg_id" ]; then
-        post_status_message "$state" "$extra" "$ef"
+        if [ "$no_post_on_404" != "no_post_on_404" ]; then
+            post_status_message "$state" "$extra" "$ef"
+        fi
         return
     fi
 
@@ -244,10 +262,12 @@ patch_status_message() {
                 return
             fi
 
-            # 404 = message deleted externally — self-heal by POSTing
+            # 404 = message deleted externally — self-heal by POSTing (unless suppressed)
             if [ "$HTTP_CODE" = "404" ]; then
                 rm -f "$resp_headers"
-                post_status_message "$state" "$extra" "$ef"
+                if [ "$no_post_on_404" != "no_post_on_404" ]; then
+                    post_status_message "$state" "$extra" "$ef"
+                fi
                 return
             fi
 
@@ -268,6 +288,52 @@ patch_status_message() {
             fi
         done
     fi
+}
+
+# Clean up duplicate/orphaned Discord messages for a project on SessionStart.
+# Requires DISCORD_BOT_TOKEN and DISCORD_CHANNEL_ID (optional — silently skips if missing).
+# Uses bot API to list messages, webhook API to delete our own.
+cleanup_project_messages() {
+    local project="$1"
+    local skip_msg_id="${2:-}"  # current tracked msg ID to skip (already handled by caller)
+
+    [ -z "${DISCORD_BOT_TOKEN:-}" ] && return 0
+    [ -z "${DISCORD_CHANNEL_ID:-}" ] && return 0
+
+    local webhook_id
+    webhook_id=$(echo "${CLAUDE_NOTIFY_WEBHOOK:-}" | sed 's|.*/webhooks/\([0-9]*\)/.*|\1|')
+    [ -z "$webhook_id" ] && return 0
+
+    local webhook_id_token
+    webhook_id_token=$(extract_webhook_id_token "$CLAUDE_NOTIFY_WEBHOOK") || return 0
+
+    # Fetch recent messages (limit 50 covers reasonable history)
+    local messages
+    messages=$(curl -s -H "Authorization: Bot $DISCORD_BOT_TOKEN" \
+        "https://discord.com/api/v10/channels/${DISCORD_CHANNEL_ID}/messages?limit=50" 2>/dev/null) || return 0
+
+    # Validate response is a JSON array
+    echo "$messages" | jq -e 'type == "array"' >/dev/null 2>&1 || return 0
+
+    # Find messages from our webhook with this project's name in embed title
+    local msg_ids
+    msg_ids=$(echo "$messages" | jq -r --arg wid "$webhook_id" --arg proj "$project" \
+        '.[] | select(.webhook_id == $wid) | select(.embeds[0].title // "" | contains($proj)) | .id' 2>/dev/null) || return 0
+
+    [ -z "$msg_ids" ] && return 0
+
+    local deleted=0
+    while IFS= read -r mid; do
+        [ -z "$mid" ] && continue
+        # Skip the message we already know about (caller handles it)
+        [ "$mid" = "$skip_msg_id" ] && continue
+        curl -s -o /dev/null -X DELETE \
+            --config <(printf 'url = "%s"\n' "https://discord.com/api/webhooks/${webhook_id_token}/messages/${mid}") \
+            2>/dev/null || true
+        deleted=$((deleted + 1))
+        # Rate limit: brief pause between deletes
+        [ "$deleted" -gt 0 ] && sleep 0.5
+    done <<< "$msg_ids"
 }
 
 # -- Subagent tracking (no webhook needed) --
@@ -332,6 +398,25 @@ fi
 
 if [ "$HOOK_EVENT" = "SessionStart" ]; then
     [ -z "${CLAUDE_NOTIFY_WEBHOOK:-}" ] && exit 0
+
+    # Lock to prevent concurrent SessionStart race (two sessions for same project
+    # could both POST, creating duplicate messages — second clear loses first's ID)
+    SESSION_LOCK="$THROTTLE_DIR/session-start-lock-${PROJECT_NAME}"
+    LOCK_ATTEMPTS=0
+    while ! mkdir "$SESSION_LOCK" 2>/dev/null; do
+        if [ -d "$SESSION_LOCK" ] && [ $(($(date +%s) - $(stat -f %m "$SESSION_LOCK" 2>/dev/null || stat -c %Y "$SESSION_LOCK" 2>/dev/null || echo 0))) -gt 30 ]; then
+            rmdir "$SESSION_LOCK" 2>/dev/null || true
+        fi
+        LOCK_ATTEMPTS=$((LOCK_ATTEMPTS + 1))
+        if [ "$LOCK_ATTEMPTS" -ge 50 ]; then
+            echo "claude-notify: warning: could not acquire SessionStart lock, proceeding unlocked" >&2
+            break
+        fi
+        sleep 0.1
+    done
+    # Clean up lock on exit (also caught by trap below for safety)
+    trap 'rmdir "$SESSION_LOCK" 2>/dev/null || true' EXIT
+
     # Delete previous session's offline message (if any) before clean slate
     OLD_MSG_ID=$(read_status_msg_id)
     if [ -n "$OLD_MSG_ID" ]; then
@@ -341,6 +426,10 @@ if [ "$HOOK_EVENT" = "SessionStart" ]; then
                 2>/dev/null || true
         fi
     fi
+
+    # Clean up any duplicate/orphaned messages for this project (requires bot token)
+    cleanup_project_messages "$PROJECT_NAME" "$OLD_MSG_ID"
+
     # Kill stale heartbeat from previous session BEFORE clear_status_files
     # (clear_status_files removes the PID file we need to read)
     HEARTBEAT_PID_FILE="$THROTTLE_DIR/heartbeat-pid-${PROJECT_NAME}"
@@ -360,6 +449,7 @@ if [ "$HOOK_EVENT" = "SessionStart" ]; then
         SESSION_ID="$(date +%s)-$$-${RANDOM:-0}"
     fi
     write_session_id "$SESSION_ID"
+    write_parent_pid "$PPID"
     write_tool_count "0"
     write_peak_subagents "0"
     write_bg_bash_count "0"
@@ -398,7 +488,8 @@ if [ "$HOOK_EVENT" = "SessionEnd" ]; then
 
     CURRENT_STATE=$(read_status_state)
     if [ -n "$CURRENT_STATE" ] && [ "$CURRENT_STATE" != "offline" ]; then
-        patch_status_message "offline" "" "$EXTRA_FIELDS"
+        # no_post_on_404: if message was already deleted, don't create an orphan offline message
+        patch_status_message "offline" "" "$EXTRA_FIELDS" "no_post_on_404"
     fi
     clear_status_files "keep_msg_id"
     exit 0
@@ -457,7 +548,13 @@ if [ "$HOOK_EVENT" = "PostToolUse" ]; then
             fi
             exit 0
             ;;
-        *)              exit 0 ;;  # offline/empty = no-op
+        offline)        exit 0 ;;
+        "")
+            # Empty state = status files were lost (cleanup, crash, etc.)
+            # Self-heal: POST a fresh online message so the session is visible again
+            post_status_message "online" "" "$EXTRA_FIELDS"
+            ;;
+        *)              exit 0 ;;  # unknown state = no-op
     esac
     exit 0
 fi

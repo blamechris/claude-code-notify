@@ -122,6 +122,10 @@ For bulk operations (clearing channels, etc.), we use a Discord bot separate fro
 
 **Note:** Bot token should NEVER be committed to git. Store in `.env` only.
 
+## Repo Memory MCP
+
+The `repo-memory` MCP is available. Prefer `get_file_summary` over `Read` when exploring code you won't edit — it returns cached summaries and saves tokens. Also available: `get_project_map`, `get_related_files`, `search_by_purpose`. Use `Read` when you need exact lines or plan to edit. When launching subagents, tell them repo-memory tools are available.
+
 ## GitHub Issues
 
 - Use labels: `enhancement`, `from-review`, `bug`

@@ -108,6 +108,15 @@ mkdir -p "$NESTED_WORKTREE"
 run_hook '{"hook_event_name":"SessionStart","cwd":"'"$NESTED_WORKTREE"'","session_id":"wt-test-2"}'
 assert_false "Nested worktree agent CWD produces no state files" has_state_files "agent-bbb"
 
+# SubagentStart/SubagentStop from worktree CWDs must pass through (count toward parent project)
+rm -f "$THROTTLE_DIR"/* 2>/dev/null || true
+run_hook '{"hook_event_name":"SubagentStart","cwd":"'"$WORKTREE_DIR"'"}'
+assert_true "SubagentStart from worktree passes through to parent project" has_state_files "fake-project"
+
+rm -f "$THROTTLE_DIR"/* 2>/dev/null || true
+run_hook '{"hook_event_name":"SubagentStop","cwd":"'"$WORKTREE_DIR"'"}'
+assert_true "SubagentStop from worktree passes through to parent project" has_state_files "fake-project"
+
 # -- Tests: exact home directory ($HOME) should be filtered, but not its subdirectories --
 
 rm -f "$THROTTLE_DIR"/* 2>/dev/null || true

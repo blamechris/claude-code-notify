@@ -55,6 +55,26 @@ while true; do
         exit 0
     fi
 
+    # Check if parent process (Claude Code) is still alive
+    # If not, the session ended ungracefully — send offline update and exit
+    PARENT_PID=$(read_parent_pid)
+    if [ -n "$PARENT_PID" ] && [[ "$PARENT_PID" =~ ^[0-9]+$ ]] && ! kill -0 "$PARENT_PID" 2>/dev/null; then
+        # Parent is dead — transition to offline
+        MSG_ID=$(read_status_msg_id)
+        if [ -n "$MSG_ID" ] && [ -n "${CLAUDE_NOTIFY_WEBHOOK:-}" ]; then
+            EXTRA_FIELDS=$(build_extra_fields "${SESSION_ID:-}" "${PERMISSION_MODE:-}" "${CWD:-}" "" "")
+            PAYLOAD=$(build_status_payload "offline" "" "$EXTRA_FIELDS")
+            if WEBHOOK_ID_TOKEN=$(extract_webhook_id_token "$CLAUDE_NOTIFY_WEBHOOK"); then
+                curl -s -o /dev/null -X PATCH \
+                    -H "Content-Type: application/json" \
+                    -d "$PAYLOAD" \
+                    --config <(printf 'url = "%s"\n' "https://discord.com/api/webhooks/${WEBHOOK_ID_TOKEN}/messages/${MSG_ID}") 2>/dev/null || true
+            fi
+        fi
+        clear_status_files "keep_msg_id"
+        exit 0
+    fi
+
     # Check if a new session has superseded us (same project, different session ID)
     # Exit if: we have a session ID but the stored one is gone (cleared) or different
     STORED_SID=$(read_session_id)
@@ -92,10 +112,16 @@ while true; do
     fi
 
     if WEBHOOK_ID_TOKEN=$(extract_webhook_id_token "$CLAUDE_NOTIFY_WEBHOOK"); then
-        curl -s -o /dev/null -w "" \
+        HB_HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
             -X PATCH \
             -H "Content-Type: application/json" \
             -d "$PAYLOAD" \
-            --config <(printf 'url = "%s"\n' "https://discord.com/api/webhooks/${WEBHOOK_ID_TOKEN}/messages/${MSG_ID}") 2>/dev/null || true
+            --config <(printf 'url = "%s"\n' "https://discord.com/api/webhooks/${WEBHOOK_ID_TOKEN}/messages/${MSG_ID}") 2>/dev/null || echo "000")
+
+        # 404 = message deleted externally — clear msg ID so we stop trying
+        # Main script will self-heal via POST on next event
+        if [ "$HB_HTTP_CODE" = "404" ]; then
+            rm -f "$THROTTLE_DIR/status-msg-${PROJECT_NAME}" 2>/dev/null || true
+        fi
     fi
 done

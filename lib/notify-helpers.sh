@@ -79,13 +79,19 @@ extract_project_name() {
     local cwd=$(echo "$input" | jq -r '.cwd // empty' 2>/dev/null)
     local project_name="unknown"
     if [ -n "$cwd" ]; then
-        # Prefer git repo root name (fixes monorepo paths like chroxy/packages/app → chroxy)
-        local git_root
-        git_root=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null || true)
-        if [ -n "$git_root" ]; then
-            project_name=$(basename "$git_root")
+        # Worktree paths: .claude/worktrees/agent-xxx → use parent project name
+        # Check CWD path directly (works even without git init in the worktree)
+        if [[ "$cwd" == */.claude/worktrees/* ]]; then
+            project_name=$(basename "${cwd%%/.claude/worktrees/*}")
         else
-            project_name=$(basename "$cwd")
+            # Prefer git repo root name (fixes monorepo paths like chroxy/packages/app → chroxy)
+            local git_root
+            git_root=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null || true)
+            if [ -n "$git_root" ]; then
+                project_name=$(basename "$git_root")
+            else
+                project_name=$(basename "$cwd")
+            fi
         fi
     fi
     project_name=$(echo "$project_name" | tr -cd 'A-Za-z0-9._-')
@@ -263,6 +269,15 @@ write_last_state_change() {
     safe_write_file "$THROTTLE_DIR/last-state-change-${PROJECT_NAME}" "$1"
 }
 
+read_parent_pid() {
+    local file="$THROTTLE_DIR/parent-pid-${PROJECT_NAME}"
+    [ -f "$file" ] && cat "$file" 2>/dev/null || true
+}
+
+write_parent_pid() {
+    safe_write_file "$THROTTLE_DIR/parent-pid-${PROJECT_NAME}" "$1"
+}
+
 # Clear status/throttle/subagent files for a project.
 # Pass "keep_msg_id" to preserve the Discord message ID
 # (SessionEnd needs this so the next SessionStart can delete the offline message).
@@ -285,6 +300,7 @@ clear_status_files() {
     rm -f "$THROTTLE_DIR/last-state-change-${PROJECT_NAME}" 2>/dev/null || true
     rm -f "$THROTTLE_DIR/heartbeat-pid-${PROJECT_NAME}" 2>/dev/null || true
     rm -f "$THROTTLE_DIR/session-id-${PROJECT_NAME}" 2>/dev/null || true
+    rm -f "$THROTTLE_DIR/parent-pid-${PROJECT_NAME}" 2>/dev/null || true
 }
 
 # -- Project colors (Discord embed sidebar, decimal RGB) --
