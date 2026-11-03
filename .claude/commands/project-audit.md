@@ -18,9 +18,9 @@ Examples:
 ```
 /project-audit
 /project-audit agents=8 focus=security,performance
-/project-audit output=audits/2024-q4 verbosity=detailed
-/project-audit agents=10 include=devops,dependencies
-/project-audit focus=testing skip=competitive
+/project-audit output=audits/pre-release verbosity=detailed
+/project-audit agents=10 include=deployer,auditor
+/project-audit focus=testing skip=scout
 ```
 
 ## Instructions
@@ -94,6 +94,7 @@ Choose AGENT_COUNT agents. Always include all 5 core agents. Fill remaining slot
 | Testing | "Inspector" | Test coverage, test quality, edge cases, test architecture, CI reliability | QA architect who believes untested code is broken code. Evaluates not just coverage percentage but test quality — are the right things being tested? Are edge cases covered? Are tests brittle or robust? |
 | Feature Completeness | "Strategist" | Feature gaps, user journey completeness, error states, edge case handling, polish level | Product-minded engineer who thinks from the user's perspective. Identifies missing features, incomplete flows, poor error messages, and rough edges that hurt the user experience. |
 
+
 #### Optional Roster (auto-selected based on project profile)
 
 | Agent | Nickname | Lens | Auto-Include When | Personality |
@@ -105,6 +106,7 @@ Choose AGENT_COUNT agents. Always include all 5 core agents. Fill remaining slot
 | Dependency Health | "Auditor" | Outdated dependencies, CVEs, license compliance, dependency weight, vendoring strategy | `dependency_count` > 20 OR `security_surface` is high | Supply chain security expert who treats every dependency as a liability. Checks for outdated packages, known vulnerabilities, license conflicts, unnecessary dependencies, and whether the dependency tree is well-managed. |
 | Competitive Analysis | "Scout" | Industry standards, competing projects, missing table-stakes features, differentiation | Project is a product or library (not internal tooling) | Product strategist who knows the competitive landscape. Compares against similar projects and industry standards. Identifies table-stakes features that are missing and areas where the project could differentiate. |
 | API Design | "Contract" | API consistency, REST/GraphQL conventions, versioning, error formats, pagination, rate limiting | `has_api` | API design purist who has read every RFC. Evaluates endpoint naming, HTTP method usage, error response consistency, pagination patterns, versioning strategy, and whether the API is self-documenting. |
+
 
 #### Selection Algorithm
 
@@ -125,10 +127,10 @@ Choose AGENT_COUNT agents. Always include all 5 core agents. Fill remaining slot
 ### 4. Create Output Directory
 
 ```bash
-mkdir -p ${OUTPUT_DIR}
+mkdir -p "${OUTPUT_DIR}"
 ```
 
-If the directory already contains a previous audit, warn the user and ask whether to overwrite or create a timestamped subdirectory (e.g., `docs/project-audit/2024-12-15/`).
+If the directory already contains a previous audit, warn the user and ask whether to overwrite or create a timestamped subdirectory (e.g., `docs/project-audit/YYYY-MM-DD/`).
 
 ### 5. Launch Agent Swarm
 
@@ -210,6 +212,15 @@ Single rating X.X/5 with one-paragraph justification.
 ```
 
 **Batching:** Launch agents in parallel batches. First batch of up to 5 agents, then remaining agents in a second batch. Do NOT run agents in the background — use foreground Task calls so output returns directly.
+
+**Delegation tiers (cost discipline — do not strip):**
+
+Roles per `/tiered-delegation`: **workhorse** = one tier below the session ceiling, **mechanical** = cheapest available tier. Concrete model names live only in that skill's CUSTOMIZE-marker ladder — never here.
+
+- **Audit agents run at the workhorse tier by default.** Codebase exploration and per-lens reporting are workhorse work; do not spawn panel agents at the ceiling. The orchestrator's master assessment (step 7) is where the expensive judgment lives.
+- **Discovery pre-pass at the mechanical tier.** The step-2 profile scan's mechanical parts (file inventories, signal detection, dependency counts) run at the mechanical tier at low effort; the orchestrator interprets the results.
+- **Sample-verify instead of up-tiering.** Before filing issues from agent recommendations (step 8), re-check a ~10% sample of the load-bearing findings with a stronger tier rather than re-running agents up-tier.
+- **Fan-out budget: ~12 workhorse/ceiling subagents per run.** The budget counts workhorse- and ceiling-tier agents — a full 12-persona panel fills it exactly, and stays legal because the mechanical discovery pre-pass and the ~10% sample-verify checks do not count against it. Exceeding 12 requires an explicit one-line justification in the master assessment; **20 is a hard ceiling that includes every refute/verify agent, and no justification lifts it** (≤3 refuters per finding — queue rounds rather than widen).
 
 ### 6. Write Individual Reports
 
@@ -355,6 +366,8 @@ gh issue create \
   --body "$(cat <<'EOF'
 ## Context
 
+Filed from: session {SESSION_ID}
+
 Identified during project audit on {DATE}.
 **Source:** {OUTPUT_DIR}/00-master-assessment.md — Recommendation #{N}
 **Priority:** {P0-P3}
@@ -380,12 +393,22 @@ EOF
 )"
 ```
 
+
 ### 9. Commit Results
 
-Stage and commit all audit files:
+Stage and commit the audit files **by name**.
+
+**Stage explicit paths.** `git status --short` first, then `git add` each report you just wrote.
+Never `git add -A`, `git add .`, `git add -u`, `git add <dir>/`, or `git commit -a`. A
+trailing-slash directory add is a bulk add: the working copy is shared with concurrent sessions,
+so `${OUTPUT_DIR}/` may also hold a stale report from another run or a file that is not yours.
+`-u` is not the safe one: it restages every *tracked* file whose worktree copy differs, including
+files a clean/smudge filter rewrote without you touching them — that is how `git add -u` turned a
+tracked 21KB `.docx` into a git-lfs pointer and committed it as an edit.
 
 ```bash
-git add ${OUTPUT_DIR}/
+git status --short "${OUTPUT_DIR}"
+git add "${OUTPUT_DIR}/<agent-1>.md" "${OUTPUT_DIR}/<agent-2>.md" "${OUTPUT_DIR}/master-assessment.md"
 git commit -m "docs: project audit (${AGENT_COUNT} agents, aggregate ${AGGREGATE_RATING}/5)
 
 Agents: ${AGENT_NICKNAMES_COMMA_SEPARATED}
@@ -441,6 +464,7 @@ Output a concise summary:
 | 2/5 | Concerning. Significant issues that will cause problems at scale. |
 | 1/5 | Fundamentally broken. Needs rethinking, not patching. |
 
+
 ### Agent Behavior Rules
 
 - Agents MUST read actual source code — at least 5-10 files across different modules
@@ -488,8 +512,8 @@ Create `.claude/audit-config.json` to set defaults for this project:
   "default_agents": 8,
   "default_focus": ["security", "performance"],
   "default_verbosity": "detailed",
-  "always_include": ["devops", "dependencies"],
-  "always_skip": ["competitive"],
+  "always_include": ["deployer", "auditor"],
+  "always_skip": ["scout"],
   "output_dir": "docs/audits/"
 }
 ```
@@ -502,6 +526,8 @@ Create `.claude/audit-config.json` to set defaults for this project:
 /project-audit focus=security
 /project-audit agents=10 focus=security,performance verbosity=detailed
 /project-audit output=audits/pre-launch agents=12
-/project-audit skip=competitive,documentation
-/project-audit include=devops verbosity=brief
+/project-audit skip=scout,chronicler
+/project-audit include=deployer verbosity=brief
 ```
+
+<!-- skill-templates: project-audit 600c374 2026-11-03 -->

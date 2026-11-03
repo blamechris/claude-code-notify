@@ -1,0 +1,68 @@
+{
+  "registry": "blamechris/skill-templates",
+  "skills": {
+    "agent-review": {
+      "hash": "81d191b",
+      "installed": "2026-11-03",
+      "targets": [
+        "claude"
+      ]
+    },
+    "check-pr": {
+      "hash": "bcb8822",
+      "installed": "2026-11-03",
+      "targets": [
+        "claude"
+      ]
+    },
+    "create-issue": {
+      "hash": "881d289",
+      "installed": "2026-11-03",
+      "targets": [
+        "claude"
+      ]
+    },
+    "create-pr": {
+      "hash": "37866a5",
+      "installed": "2026-11-03",
+      "targets": [
+        "claude"
+      ]
+    },
+    "fix-ci": {
+      "hash": "bcb8822",
+      "installed": "2026-11-03",
+      "targets": [
+        "claude"
+      ]
+    },
+    "full-review": {
+      "hash": "37866a5",
+      "installed": "2026-11-03",
+      "targets": [
+        "claude"
+      ]
+    },
+    "learn": {
+      "hash": "df2de5e",
+      "installed": "2026-11-03",
+      "targets": [
+        "claude"
+      ]
+    },
+    "project-audit": {
+      "hash": "600c374",
+      "installed": "2026-11-03",
+      "targets": [
+        "claude"
+      ]
+    },
+    "swarm-audit": {
+      "hash": "a0b98e6",
+      "installed": "2026-11-03",
+      "targets": [
+        "claude"
+      ]
+    }
+  }
+}
