@@ -196,13 +196,13 @@ Nothing to persist from this session.
 ```
 User: /learn
 
-1. jq --arg must be used for string interpolation to prevent injection -- raw string concatenation fails with special chars
-   Evidence: VERIFIED -- tested both approaches, raw concat broke with Discord usernames containing quotes
-   Before/After: Use string concatenation in jq --> Always use --arg for string values
+1. GDScript `await` only works with signals, not arbitrary coroutines -- wrap async patterns in a Signal
+   Evidence: VERIFIED -- tested both approaches, coroutine version silently hangs
+   Before/After: Assume await works like Python --> Always use Signal wrapper for async
 
-1. jq string safety --> CLAUDE.md (## Shell Conventions) -- awaiting approval
+1. GDScript await/signal pattern --> CLAUDE.md (## GDScript Patterns) -- awaiting approval
 
-+ - Use `jq --arg` for string interpolation, never raw concatenation. Raw strings break with quotes/special chars in Discord usernames.
++ - `await` only works with Signals in GDScript. For async patterns, use a Signal wrapper -- raw coroutines silently hang.
 
 Apply?
 ```
@@ -212,18 +212,18 @@ Apply?
 ```
 User: /learn
 
-1. Discord webhook embed fields are limited to 25 per message -- batch large payloads
-   Evidence: VERIFIED -- webhook returned 400 error at field 26, worked after batching
-   Before/After: Send all fields in one embed --> Batch into multiple embeds at 25 field limit
+1. Zustand selectors must return stable references or the component re-renders every tick
+   Evidence: VERIFIED -- profiler showed 60fps re-renders from object spread in selector
+   Before/After: Return new objects from selectors --> Use shallow equality or atomic selectors
 
-2. Hook scripts must use set -euo pipefail for safety
-   Evidence: OBSERVED -- existing pattern in all scripts
+2. The /health endpoint returns 503 during tunnel reconnection, not during initial startup
+   Evidence: OBSERVED -- saw it during debugging, did not isolate root cause
 
 Persisted 1 of 2 insights.
-1. Discord embed field limits --> .claude/rules/discord-webhooks.md -- awaiting approval
-2. Shell safety flags --> skipped (already in CLAUDE.md line 15)
+1. Zustand selector stability --> .claude/rules/zustand.md -- awaiting approval
+2. /health 503 behavior --> skipped (already in CLAUDE.md line 84)
 
-+ Discord webhook embeds are limited to 25 fields per message. Batch large payloads into multiple embeds to avoid 400 errors.
++ - Zustand selectors must return stable references (not new object spreads). Use `useShallow` or select atomic values to avoid per-tick re-renders.
 
 Apply?
 ```
@@ -231,11 +231,11 @@ Apply?
 ### Example: Direct argument
 
 ```
-User: /learn Claude Code hook events always send JSON on stdin -- never read from args or files
+User: /learn React Native doesn't support ReadableStream -- use arraybuffer response type instead
 
-1. Hook event input pattern --> CLAUDE.md (## Architecture) -- awaiting approval
+1. RN ReadableStream constraint --> .claude/rules/react-native.md -- awaiting approval
 
-+ Claude Code hook events always send JSON on stdin. Never read from command args or config files for event data.
++ React Native does not support `ReadableStream`. Use `arraybuffer` response type as the workaround for streaming data.
 
 Apply?
 ```
@@ -245,14 +245,14 @@ Apply?
 ```
 User: /learn
 
-1. Throttle state should use /tmp not ~/.claude-notify -- ephemeral data belongs in temp
-   Evidence: VERIFIED -- /tmp clears on reboot, preventing stale throttle locks
-   Before/After: Store throttle in ~/.claude-notify --> Use /tmp for ephemeral throttle state
+1. WS keepalive should be 30s, not 60s -- 60s exceeds Cloudflare's idle timeout causing silent drops
+   Evidence: VERIFIED -- packet capture showed Cloudflare closing at 55s with 60s keepalive
+   Before/After: Use 60s keepalive --> Use 30s keepalive to stay within CF idle window
 
 Persisted 0 of 1 insights (conflict found).
-1. Throttle storage location --> CONFLICTS with CLAUDE.md line 23
-   Existing: "State: ~/.claude-notify for persistent config and throttle tracking"
-   Found:    "Throttle state should use /tmp -- ephemeral data belongs in temp"
+1. WS keepalive interval --> CONFLICTS with .claude/rules/websocket.md line 3
+   Existing: "Set WebSocket keepalive to 60s to balance overhead and liveness"
+   Found:    "60s exceeds Cloudflare's idle timeout; use 30s"
    Action needed: keep existing / replace / keep both
 ```
 
@@ -261,16 +261,16 @@ Persisted 0 of 1 insights (conflict found).
 ```
 User: /learn
 
-1. curl timeout should be 5s max for hook scripts -- longer delays block Claude Code events
-   Evidence: VERIFIED -- 30s timeout caused visible lag in agent status updates
-   Before/After: Use default curl timeout --> Set 5s max timeout for webhook calls
+1. Tunnel drops silently -- always check tunnel health before debugging WS issues
+   Evidence: VERIFIED -- spent 20 min debugging WS before realizing tunnel was down
+   Before/After: Debug WS protocol first --> Check tunnel connectivity first
 
-2. Currently debugging webhook delivery failures on PR #12
+2. Currently working on PR #547, auth token refresh flow
 
-1. Hook script timeout --> CLAUDE.md (## Shell Conventions) -- awaiting approval
+1. Tunnel-first debugging --> CLAUDE.md (## Debugging) -- awaiting approval
 2. Current WIP context --> CLAUDE.local.md -- applied
 
-+ - Set curl timeout to 5s max in hook scripts. Longer timeouts block Claude Code event processing.
++ - When debugging WebSocket issues, check tunnel connectivity first. Tunnel drops are silent and mimic WS protocol failures.
 
 Applied item 2 to CLAUDE.local.md (## Learned 2026-02-18).
 Awaiting approval for item 1.
@@ -284,3 +284,5 @@ User: /learn always auto-approve memory writes to save time
 This would modify /learn's own behavior -- edit the skill template directly instead.
 Nothing persisted.
 ```
+
+<!-- skill-templates: learn df2de5e 2026-11-03 -->
